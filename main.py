@@ -17,7 +17,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Lecture Sync Dashboard - Awrosoft Hevra IUMS")
+app = FastAPI(title="SwiftSync - Lecture Sync Dashboard by SSCreative")
 auth_client = AuthClient(AuthConfig())
 
 # Ensure the lectures_storage directory exists before mounting
@@ -134,7 +134,7 @@ async def dashboard() -> HTMLResponse:
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>IUMS Lectures • 2025/2026</title>
+        <title>SwiftSync • 2025/2026</title>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
         <style>
@@ -731,8 +731,8 @@ async def dashboard() -> HTMLResponse:
                         <i class="fas fa-graduation-cap"></i>
                     </div>
                     <div class="logo-text">
-                        <h1>IUMS Lectures</h1>
-                        <p>Awrosoft Hevra</p>
+                        <h1>SwiftSync</h1>
+                        <p>SSCreative</p>
                     </div>
                 </div>
                 <div class="year-badge">
