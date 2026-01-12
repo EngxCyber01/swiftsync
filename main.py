@@ -162,6 +162,23 @@ async def dashboard() -> HTMLResponse:
                 padding: 0;
                 margin: 0;
                 overflow-x: hidden;
+                cursor: default;
+            }}
+            
+            /* Hide text cursor but allow selection */
+            * {{
+                caret-color: transparent;
+            }}
+            
+            /* Allow text selection for copying */
+            ::selection {{
+                background: var(--accent);
+                color: var(--bg-primary);
+            }}
+            
+            ::-moz-selection {{
+                background: var(--accent);
+                color: var(--bg-primary);
             }}
             
             /* Animated Background */
@@ -367,6 +384,8 @@ async def dashboard() -> HTMLResponse:
                 font-size: 0.95rem;
                 font-weight: 500;
                 transition: all 0.3s;
+                caret-color: var(--accent);
+                cursor: text;
             }}
             
             .search-box input:focus {{
@@ -404,6 +423,7 @@ async def dashboard() -> HTMLResponse:
                 gap: 0.75rem;
                 position: relative;
                 overflow: hidden;
+                user-select: none;
             }}
             
             .sync-btn::before {{
@@ -478,6 +498,7 @@ async def dashboard() -> HTMLResponse:
                 justify-content: space-between;
                 align-items: center;
                 transition: all 0.3s;
+                user-select: none;
             }}
             
             .subject-header:hover {{
@@ -597,6 +618,8 @@ async def dashboard() -> HTMLResponse:
                 margin-bottom: 0.5rem;
                 font-size: 0.95rem;
                 line-height: 1.4;
+                user-select: text;
+                cursor: text;
             }}
             
             .file-meta {{
@@ -632,6 +655,7 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 align-items: center;
                 gap: 0.5rem;
+                user-select: none;
                 white-space: nowrap;
             }}
             
@@ -782,6 +806,22 @@ async def dashboard() -> HTMLResponse:
         </div>
         
         <script>
+            // Disable right-click for professional web app feel
+            document.addEventListener('contextmenu', (e) => {{
+                e.preventDefault();
+                return false;
+            }});
+            
+            // Disable common dev tools shortcuts
+            document.addEventListener('keydown', (e) => {{
+                if (e.key === 'F12' || 
+                    (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
+                    (e.ctrlKey && e.key === 'U')) {{
+                    e.preventDefault();
+                    return false;
+                }}
+            }});
+            
             let allFilesData = {{}};
             
             function formatBytes(bytes) {{
