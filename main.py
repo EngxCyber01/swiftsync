@@ -862,6 +862,7 @@ async def dashboard() -> HTMLResponse:
             }});
             
             let allFilesData = {{}};
+            let originalFilesData = {{}}; // Keep original data for search reset
             
             function formatBytes(bytes) {{
                 if (bytes === 0) return '0 B';
@@ -895,8 +896,12 @@ async def dashboard() -> HTMLResponse:
                 return 'default';
             }}
             
-            function renderFiles(data) {{
-                allFilesData = data;
+            function renderFiles(data, isFiltering = false) {{
+                // Only update original data on initial load, not during filtering
+                if (!isFiltering) {{
+                    allFilesData = data;
+                    originalFilesData = JSON.parse(JSON.stringify(data)); // Deep copy
+                }}
                 const fileGrid = document.getElementById('fileGrid');
                 const subjects = Object.keys(data);
                 
@@ -978,15 +983,16 @@ async def dashboard() -> HTMLResponse:
             
             // Search functionality
             document.getElementById('searchInput').addEventListener('input', (e) => {{
-                const query = e.target.value.toLowerCase();
+                const query = e.target.value.toLowerCase().trim();
                 if (!query) {{
-                    renderFiles(allFilesData);
+                    // Restore original full data when search is cleared
+                    renderFiles(originalFilesData, false);
                     return;
                 }}
                 
                 const filtered = {{}};
-                Object.keys(allFilesData).forEach(subject => {{
-                    const matchingFiles = allFilesData[subject].filter(file => 
+                Object.keys(originalFilesData).forEach(subject => {{
+                    const matchingFiles = originalFilesData[subject].filter(file => 
                         file.name.toLowerCase().includes(query) ||
                         subject.toLowerCase().includes(query)
                     );
@@ -995,7 +1001,7 @@ async def dashboard() -> HTMLResponse:
                     }}
                 }});
                 
-                renderFiles(filtered);
+                renderFiles(filtered, true);
             }});
             
             // Sync Now functionality

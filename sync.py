@@ -127,82 +127,72 @@ def fetch_timeline_with_subjects(session: requests.Session) -> dict:
 
     soup = BeautifulSoup(response.text, 'html.parser')
     subjects_data = {}
-    seen_file_ids = set()  # Track globally to avoid duplicates across subjects
+    seen_file_ids = set()
     
     # Find 2025-2026 year section
     for year_section in soup.find_all('span', class_='float-left font-weight-bold'):
         year_text = year_section.get_text(strip=True)
-        # ONLY process 2025-2026 academic year
-        if '2025-2026' in year_text:
-            logger.info("Found academic year section: %s", year_text)
-            card = year_section.find_parent('div', class_='card')
-            if card:
-                # Find all subject headers: <p class="m-0 float-left font-weight-bold">
-                # Beautiful Soup stores classes as a list
-                all_p_tags = card.find_all('p')
+        if '2025-2026' not in year_text:
+            continue
+            
+        logger.info("Found academic year section: %s", year_text)
+        card = year_section.find_parent('div', class_='card')
+        if not card:
+            continue
+            
+        # Find all subject headers
+        all_p_tags = card.find_all('p')
+        download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
+        
+        for p_tag in all_p_tags:
+            classes = p_tag.get('class', [])
+            # Must have all three classes
+            if not ('m-0' in classes and 'float-left' in classes and 'font-weight-bold' in classes):
+                continue
                 
-                for p_tag in all_p_tags:
-                    classes = p_tag.get('class', [])
-                    # Check if it has the required classes
-                    if 'm-0' in classes and 'float-left' in classes and 'font-weight-bold' in classes:
-                        subject_name = p_tag.get_text(strip=True)
-                        
-                        # Skip semester headers and empty names
-                        if not subject_name or len(subject_name) < 5:
-                            continue
-                        if subject_name in ['Fall Semester', 'Spring Semester', 'Summer Semester']:
-                            logger.debug("Skipping semester header: %s", subject_name)
-                            continue
-                        
-                        # Find the parent container
-                        container = p_tag.find_parent('div', class_='card-body')
-                        if not container:
-                            container = p_tag.find_parent('div')
-                        
-                        if container:
-                            # Extract file IDs - search in siblings after this p tag
-                            download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
-                            
-                            # Get all siblings after this subject header until the next one
-                            sibling_html = ""
-                            current_elem = p_tag.find_next_sibling()
-                            while current_elem:
-                                # Stop if we hit another subject header
-                                if current_elem.name == 'p':
-                                    elem_classes = current_elem.get('class', [])
-                                    if 'm-0' in elem_classes and 'float-left' in elem_classes and 'font-weight-bold' in elem_classes:
-                                        break
-                                sibling_html += str(current_elem)
-                                current_elem = current_elem.find_next_sibling()
-                            
-                            if not sibling_html:
-                                # If no siblings, use the whole container
-                                sibling_html = str(container)
-                            
-                            matches = re.findall(download_pattern, sibling_html)
-                        
-                        # Filter out already seen IDs to avoid duplicates
-                        new_matches = [m for m in matches if m not in seen_file_ids]
-                        
-                        if new_matches:
-                            subjects_data[subject_name] = new_matches
-                            seen_file_ids.update(new_matches)
-                            logger.info("Found %d unique files in subject: %s", len(new_matches), subject_name)
+            subject_name = p_tag.get_text(strip=True)
+            
+            # Skip semester headers and empty
+            if not subject_name or len(subject_name) < 5:
+                continue
+            if subject_name in ['Fall Semester', 'Spring Semester', 'Summer Semester']:
+                continue
+            
+            # Get HTML from this subject to next subject
+            sibling_html = str(p_tag)
+            current_elem = p_tag
+            
+            for _ in range(100):
+                next_elem = current_elem.find_next_sibling()
+                if not next_elem:
+                    break
+                    
+                # Stop at next subject header
+                if next_elem.name == 'p':
+                    next_classes = next_elem.get('class', [])
+                    if 'm-0' in next_classes and 'float-left' in next_classes and 'font-weight-bold' in next_classes:
+                        break
+                
+                sibling_html += str(next_elem)
+                current_elem = next_elem
+            
+            # Extract file IDs
+            matches = re.findall(download_pattern, sibling_html)
+            new_matches = [m for m in matches if m not in seen_file_ids]
+            
+            if new_matches:
+                subjects_data[subject_name] = new_matches
+                seen_file_ids.update(new_matches)
+                logger.info("Found %d unique files in subject: %s", len(new_matches), subject_name)
+        
+        # If no subjects found, use fallback
+        if not subjects_data:
+            logger.warning("No subjects found, using fallback extraction")
+            all_matches = re.findall(download_pattern, str(card))
+            subjects_data['All Lectures'] = list(set(all_matches))
+            logger.info("Found %d files in fallback mode", len(subjects_data['All Lectures']))
     
-    if not subjects_data:
-        logger.warning("No subjects found, extracting all files from 2025-2026")
-        # Fallback: extract all files under one category
-        for year_section in soup.find_all('span', class_='float-left font-weight-bold'):
-            year_text = year_section.get_text(strip=True)
-            if '2025-2026' in year_text:
-                card = year_section.find_parent('div', class_='card')
-                if card:
-                    download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
-                    matches = re.findall(download_pattern, str(card))
-                    subjects_data['All Lectures'] = list(set(matches))
-                    logger.info("Found %d files in fallback mode", len(subjects_data['All Lectures']))
-    
-    logger.info("Total subjects: %d, Total files: %d", len(subjects_data), len(seen_file_ids))
+    logger.info("Total subjects: %d, Total unique files: %d", len(subjects_data), len(seen_file_ids) if seen_file_ids else sum(len(v) for v in subjects_data.values()))
     return subjects_data
 
 
