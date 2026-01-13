@@ -134,18 +134,34 @@ def fetch_timeline_with_subjects(session: requests.Session) -> dict:
         if '2025-2026' in year_text:
             card = year_section.find_parent('div', class_='card')
             if card:
-                # Find all subject sections within this year
-                for subject_header in card.find_all('h6', class_='text-primary'):
-                    subject_name = subject_header.get_text(strip=True)
-                    # Find the parent that contains files for this subject
-                    subject_container = subject_header.find_parent('div', class_='card-body')
-                    if subject_container:
-                        # Extract file IDs from this subject
-                        download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
-                        matches = re.findall(download_pattern, str(subject_container))
-                        if matches:
-                            subjects_data[subject_name] = matches
-                            logger.info("Found %d files in subject: %s", len(matches), subject_name)
+                # Try multiple strategies to find subject headers (h6, h5, div with specific classes)
+                subject_headers = (
+                    card.find_all('h6', class_='text-primary') or
+                    card.find_all('h6') or
+                    card.find_all('h5') or
+                    card.find_all('div', class_='subject-header')
+                )
+                
+                if subject_headers:
+                    for subject_header in subject_headers:
+                        subject_name = subject_header.get_text(strip=True)
+                        # Find the parent that contains files for this subject
+                        subject_container = subject_header.find_parent('div', class_='card-body')
+                        if subject_container:
+                            # Extract file IDs from this subject
+                            download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
+                            matches = re.findall(download_pattern, str(subject_container))
+                            if matches:
+                                subjects_data[subject_name] = matches
+                                logger.info("Found %d files in subject: %s", len(matches), subject_name)
+                else:
+                    # If no subject headers found, extract all IDs from the card
+                    logger.warning("No subject headers found, extracting all IDs from 2025-2026 card")
+                    download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
+                    matches = re.findall(download_pattern, str(card))
+                    if matches:
+                        subjects_data['General'] = matches
+                        logger.info("Found %d files in General category", len(matches))
     
     logger.info("Total subjects: %d", len(subjects_data))
     return subjects_data
