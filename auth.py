@@ -20,6 +20,19 @@ class AuthConfig:
     username: str = os.getenv("PORTAL_USERNAME", "")
     password: str = os.getenv("PORTAL_PASSWORD", "")
     verify_ssl: bool = True
+    
+    def __post_init__(self):
+        """Validate credentials are set"""
+        if not self.username or not self.password:
+            missing = []
+            if not self.username:
+                missing.append("PORTAL_USERNAME")
+            if not self.password:
+                missing.append("PORTAL_PASSWORD")
+            raise ValueError(
+                f"Missing credentials: {', '.join(missing)}. "
+                f"Set PORTAL_USERNAME and PORTAL_PASSWORD in .env file."
+            )
 
 
 class AuthError(Exception):
