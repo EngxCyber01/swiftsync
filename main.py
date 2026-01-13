@@ -29,12 +29,16 @@ async def sync_worker() -> None:
     """Background worker that syncs lectures periodically"""
     # Wait a bit before starting to let the server fully start
     await asyncio.sleep(5)
+    logger.info("Background sync worker started. Checking for new lectures every %d seconds", SYNC_INTERVAL_SECONDS)
     
     while True:
         try:
+            logger.info("Checking for new lectures...")
             added, _ = await asyncio.to_thread(sync_once, auth_client)
             if added:
-                logger.info("Synced %s new file(s).", added)
+                logger.info("✅ Synced %s new file(s).", added)
+            else:
+                logger.info("✓ No new lectures found")
         except AuthError as exc:
             logger.warning("Authentication error in sync worker: %s. Will retry with re-authentication.", exc)
             try:
@@ -49,10 +53,9 @@ async def sync_worker() -> None:
 
 @app.on_event("startup")
 async def start_background_sync() -> None:
-    # Kick off the background sync loop
-    # Temporarily disabled to debug crash
-    # asyncio.create_task(sync_worker())
-    pass
+    """Start the background sync worker that checks for new lectures every hour"""
+    logger.info("Starting background sync worker (checks every %d seconds)", SYNC_INTERVAL_SECONDS)
+    asyncio.create_task(sync_worker())
 
 
 @app.get("/health")
