@@ -604,10 +604,12 @@ async def dashboard() -> HTMLResponse:
             
             .collapse-btn i {{
                 transition: transform 0.3s;
+                transform: rotate(-90deg);
             }}
             
             .subject-files {{
                 padding: 1.5rem;
+                display: none;
             }}
             
             /* File Items */
@@ -925,10 +927,14 @@ async def dashboard() -> HTMLResponse:
                     fileGrid.innerHTML = `
                         <div class="empty-state">
                             <i class="fas fa-inbox"></i>
-                            <h3>No Lectures Yet</h3>
-                            <p>Click "Sync Now" to fetch the latest lectures from the portal</p>
+                            <h3>No Lectures Found</h3>
+                            <p>No lectures match your search</p>
                         </div>
                     `;
+                    // Update stats to show 0 when no results
+                    document.getElementById('totalFiles').textContent = 0;
+                    document.getElementById('totalSize').textContent = formatBytes(0);
+                    document.getElementById('totalSubjects').textContent = 0;
                     return;
                 }}
                 
@@ -988,7 +994,7 @@ async def dashboard() -> HTMLResponse:
                 const files = section.querySelector('.subject-files');
                 const icon = header.querySelector('.collapse-btn i');
                 
-                if (files.style.display === 'none') {{
+                if (files.style.display === 'none' || files.style.display === '') {{
                     files.style.display = 'block';
                     icon.style.transform = 'rotate(0deg)';
                 }} else {{
