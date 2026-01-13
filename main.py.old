@@ -1,0 +1,925 @@
+import asyncio
+import logging
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import List
+
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from auth import AuthClient, AuthConfig, AuthError
+from sync import DOWNLOAD_DIR, SYNC_INTERVAL_SECONDS, sync_once
+
+load_dotenv()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Lecture Sync Dashboard - Awrosoft Hevra IUMS")
+auth_client = AuthClient(AuthConfig())
+
+# Ensure the lectures_storage directory exists before mounting
+DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/files", StaticFiles(directory=DOWNLOAD_DIR, html=False), name="files")
+
+
+async def sync_worker() -> None:
+    """Background worker that syncs lectures periodically"""
+    # Wait a bit before starting to let the server fully start
+    await asyncio.sleep(5)
+    
+    while True:
+        try:
+            added, _ = await asyncio.to_thread(sync_once, auth_client)
+            if added:
+                logger.info("Synced %s new file(s).", added)
+        except AuthError as exc:
+            logger.warning("Authentication error in sync worker: %s. Will retry with re-authentication.", exc)
+            try:
+                await asyncio.to_thread(auth_client.login)
+            except Exception as login_exc:  # noqa: BLE001
+                logger.exception("Failed to re-authenticate: %s", login_exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Sync worker failed: %s", exc)
+        
+        await asyncio.sleep(SYNC_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def start_background_sync() -> None:
+    # Kick off the background sync loop
+    # Temporarily disabled to debug crash
+    # asyncio.create_task(sync_worker())
+    pass
+
+
+@app.get("/health")
+async def health() -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
+
+@app.post("/api/sync-now")
+async def manual_sync() -> JSONResponse:
+    """Trigger immediate sync (for testing)"""
+    try:
+        added, files = await asyncio.to_thread(sync_once, auth_client)
+        return JSONResponse({
+            "success": True,
+            "message": f"Synced {added} new file(s)",
+            "files": [f.name for f in files]
+        })
+    except AuthError as exc:
+        logger.exception("Auth error during manual sync")
+        return JSONResponse({
+            "success": False,
+            "error": f"Authentication failed: {str(exc)}"
+        }, status_code=401)
+    except Exception as exc:
+        logger.exception("Error during manual sync")
+        return JSONResponse({
+            "success": False,
+            "error": str(exc)
+        }, status_code=500)
+
+
+@app.get("/api/files")
+async def list_files() -> JSONResponse:
+    """List all files grouped by subject"""
+    import sqlite3
+    from pathlib import Path
+    
+    files_by_subject = {}
+    
+    # Try to get subject information from database
+    db_path = Path(__file__).parent / "data" / "lecture_sync.db"
+    if db_path.exists():
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.execute("SELECT filename, subject FROM synced_items WHERE filename IS NOT NULL")
+                db_subjects = {row[0]: row[1] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error("Error reading subjects from database: %s", e)
+            db_subjects = {}
+    else:
+        db_subjects = {}
+    
+    # List all files
+    if DOWNLOAD_DIR.exists():
+        for path in sorted(DOWNLOAD_DIR.iterdir()):
+            if path.is_file():
+                stat = path.stat()
+                subject = db_subjects.get(path.name) or "Other"
+                
+                file_info = {
+                    "name": path.name,
+                    "size_bytes": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "url": f"/files/{path.name}",
+                }
+                
+                if subject not in files_by_subject:
+                    files_by_subject[subject] = []
+                files_by_subject[subject].append(file_info)
+    
+    return JSONResponse(files_by_subject)
+
+
+@app.get("/")
+async def dashboard() -> HTMLResponse:
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>IUMS Lectures • 2025/2026</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            
+            :root {{
+                --bg-primary: #0a0a0a;
+                --bg-secondary: #111111;
+                --bg-tertiary: #1a1a1a;
+                --text-primary: #ffffff;
+                --text-secondary: #a0a0a0;
+                --text-tertiary: #666666;
+                --accent: #00d9ff;
+                --accent-glow: rgba(0, 217, 255, 0.3);
+                --success: #00ff88;
+                --border: rgba(255, 255, 255, 0.1);
+                --glass: rgba(255, 255, 255, 0.05);
+            }}
+            
+            body {{ 
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+                background: var(--bg-primary);
+                color: var(--text-primary);
+                min-height: 100vh;
+                padding: 0;
+                margin: 0;
+                overflow-x: hidden;
+            }}
+            
+            /* Animated Background */
+            body::before {{
+                content: '';
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: 
+                    radial-gradient(circle at 20% 50%, rgba(0, 217, 255, 0.15) 0%, transparent 50%),
+                    radial-gradient(circle at 80% 80%, rgba(0, 255, 136, 0.1) 0%, transparent 50%),
+                    radial-gradient(circle at 40% 20%, rgba(138, 43, 226, 0.1) 0%, transparent 50%);
+                pointer-events: none;
+                animation: bgShift 20s ease infinite;
+            }}
+            
+            @keyframes bgShift {{
+                0%, 100% {{ opacity: 1; }}
+                50% {{ opacity: 0.8; }}
+            }}
+            
+            .container {{
+                max-width: 1400px;
+                margin: 0 auto;
+                padding: 2rem 1.5rem;
+                position: relative;
+                z-index: 1;
+            }}
+            
+            .header h1 {{
+                font-size: 2.5rem;
+                font-weight: 700;
+                margin-bottom: 0.5rem;
+                text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            
+            .header .subtitle {{
+                font-size: 1.1rem;
+                opacity: 0.95;
+                font-weight: 300;
+            }}
+            
+            .stats-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 1rem;
+                margin-bottom: 2rem;
+            }}
+            
+            .stat-card {{
+                background: rgba(255, 255, 255, 0.95);
+                padding: 1.5rem;
+                border-radius: 12px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                animation: fadeInUp 0.6s ease;
+            }}
+            
+            .stat-icon {{
+                font-size: 2rem;
+                width: 60px;
+                height: 60px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 12px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }}
+            
+            .stat-info h3 {{
+                font-size: 1.8rem;
+                font-weight: 700;
+                color: #2d3748;
+            }}
+            
+            .stat-info p {{
+                color: #718096;
+                font-size: 0.9rem;
+                margin-top: 0.25rem;
+            }}
+            
+            .main-card {{
+                background: white;
+                border-radius: 16px;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+                overflow: hidden;
+                animation: fadeInUp 0.6s ease 0.2s both;
+            }}
+            
+            .card-header {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 1.5rem 2rem;
+                color: white;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 1rem;
+            }}
+            
+            .card-header h2 {{
+                font-size: 1.3rem;
+                font-weight: 600;
+            }}
+            
+            .header-actions {{
+                display: flex;
+                gap: 1rem;
+                align-items: center;
+            }}
+            
+            .sync-now-btn {{
+                padding: 0.5rem 1rem;
+                background: rgba(255, 255, 255, 0.2);
+                border: 2px solid white;
+                color: white;
+                border-radius: 6px;
+                cursor: pointer;
+                font-weight: 600;
+                transition: all 0.3s;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }}
+            
+            .sync-now-btn:hover {{
+                background: white;
+                color: #667eea;
+            }}
+            
+            .sync-now-btn:disabled {{
+                opacity: 0.5;
+                cursor: not-allowed;
+            }}
+            
+            .sync-status {{
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                font-size: 0.9rem;
+                background: rgba(255, 255, 255, 0.2);
+                padding: 0.5rem 1rem;
+                border-radius: 20px;
+            }}
+            
+            .pulse {{
+                width: 8px;
+                height: 8px;
+                background: #48bb78;
+                border-radius: 50%;
+                animation: pulse 2s infinite;
+            }}
+            
+            @keyframes pulse {{
+                0%, 100% {{ opacity: 1; }}
+                50% {{ opacity: 0.5; }}
+            }}
+            
+            .search-bar {{
+                padding: 1.5rem 2rem;
+                background: #f7fafc;
+                border-bottom: 1px solid #e2e8f0;
+            }}
+            
+            .search-input {{
+                width: 100%;
+                padding: 0.75rem 1rem 0.75rem 2.5rem;
+                border: 2px solid #e2e8f0;
+                border-radius: 8px;
+                font-size: 1rem;
+                transition: all 0.3s;
+                background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cpath d='m21 21-4.35-4.35'%3E%3C/path%3E%3C/svg%3E") no-repeat 0.75rem center;
+            }}
+            
+            .search-input:focus {{
+                outline: none;
+                border-color: #667eea;
+                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            }}
+            
+            .files-container {{
+                padding: 2rem;
+                max-height: 600px;
+                overflow-y: auto;
+            }}
+            
+            .file-grid {{
+                display: grid;
+                gap: 1rem;
+            }}
+            
+            .file-item {{
+                display: grid;
+                grid-template-columns: auto 1fr auto auto;
+                gap: 1rem;
+                padding: 1rem;
+                background: #f7fafc;
+                border-radius: 8px;
+                border: 2px solid transparent;
+                transition: all 0.3s;
+                align-items: center;
+            }}
+            
+            .file-item:hover {{
+                background: white;
+                border-color: #667eea;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+            }}
+            
+            .file-icon {{
+                width: 56px;
+                height: 56px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: var(--radius);
+                font-size: 1.5rem;
+                flex-shrink: 0;
+                box-shadow: var(--shadow-sm);
+            }}
+            
+            .file-icon.pdf {{ 
+                background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+                color: #dc2626;
+            }}
+            .file-icon.doc {{ 
+                background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+                color: #2563eb;
+            }}
+            .file-icon.ppt {{ 
+                background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%);
+                color: #ea580c;
+            }}
+            .file-icon.zip {{ 
+                background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+                color: #059669;
+            }}
+            .file-icon.video {{ 
+                background: linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%);
+                color: #9333ea;
+            }}
+            .file-icon.default {{ 
+                background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+                color: #64748b;
+            }}
+            
+            .file-info {{
+                flex: 1;
+                min-width: 0;
+            }}
+            
+            .file-name {{
+                font-weight: 600;
+                color: var(--gray-900);
+                margin-bottom: 0.375rem;
+                word-break: break-word;
+                font-size: 0.95rem;
+                line-height: 1.4;
+            }}
+            
+            .file-meta {{
+                color: var(--gray-500);
+                font-size: 0.8rem;
+                font-weight: 500;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }}
+            
+            .file-meta i {{
+                font-size: 0.75rem;
+            }}
+            
+            .file-size {{
+                font-weight: 700;
+                color: var(--gray-700);
+                padding: 0.625rem 1.125rem;
+                background: var(--gray-100);
+                border-radius: var(--radius);
+                font-size: 0.875rem;
+                letter-spacing: 0.01em;
+                white-space: nowrap;
+            }}
+            
+            .download-btn {{
+                padding: 0.75rem 1.5rem;
+                background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+                color: white;
+                border: none;
+                border-radius: var(--radius);
+                cursor: pointer;
+                font-weight: 700;
+                font-size: 0.875rem;
+                transition: var(--transition);
+                text-decoration: none;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.625rem;
+                box-shadow: var(--shadow-md);
+                letter-spacing: 0.01em;
+                white-space: nowrap;
+            }}
+            
+            .download-btn:hover {{
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-lg);
+            }}
+            
+            .download-btn:active {{
+                transform: translateY(0);
+            }}
+            
+            .empty-state {{
+                text-align: center;
+                padding: 5rem 2rem;
+                color: var(--gray-500);
+                background: white;
+                border-radius: var(--radius-lg);
+                box-shadow: var(--shadow);
+            }}
+            
+            .empty-state i {{
+                font-size: 4rem;
+                margin-bottom: 1.5rem;
+                opacity: 0.4;
+                color: var(--gray-400);
+            }}
+            
+            .empty-state h3 {{
+                font-size: 1.5rem;
+                margin-bottom: 0.75rem;
+                color: var(--gray-900);
+                font-weight: 700;
+            }}
+            
+            .empty-state p {{
+                font-size: 1rem;
+                color: var(--gray-600);
+            }}
+            
+            @keyframes fadeInDown {{
+                from {{ opacity: 0; transform: translateY(-30px); }}
+                to {{ opacity: 1; transform: translateY(0); }}
+            }}
+            
+            @keyframes fadeInUp {{
+                from {{ opacity: 0; transform: translateY(30px); }}
+                to {{ opacity: 1; transform: translateY(0); }}
+            }}
+            
+            @keyframes slideIn {{
+                from {{ opacity: 0; transform: translateX(-20px); }}
+                to {{ opacity: 1; transform: translateX(0); }}
+            }}
+            
+            .subject-section {{
+                margin-bottom: 1.5rem;
+                background: white;
+                border-radius: var(--radius-lg);
+                box-shadow: var(--shadow);
+                overflow: hidden;
+                border: 1px solid var(--gray-200);
+                transition: var(--transition);
+            }}
+            
+            .subject-section:hover {{
+                box-shadow: var(--shadow-lg);
+                border-color: var(--gray-300);
+            }}
+            
+            .subject-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 1.5rem 1.75rem;
+                background: linear-gradient(135deg, var(--gray-900) 0%, var(--gray-800) 100%);
+                color: white;
+                cursor: pointer;
+                user-select: none;
+                transition: var(--transition);
+            }}
+            
+            .subject-header:hover {{
+                background: linear-gradient(135deg, var(--primary-dark) 0%, var(--secondary) 100%);
+            }}
+            
+            .subject-title {{
+                font-size: 1.1rem;
+                font-weight: 700;
+                margin: 0;
+                display: flex;
+                align-items: center;
+                gap: 0.875rem;
+                letter-spacing: -0.01em;
+            }}
+            
+            .subject-title i {{
+                font-size: 1.25rem;
+                opacity: 0.9;
+            }}
+            
+            .file-count {{
+                font-size: 0.8rem;
+                font-weight: 600;
+                background: rgba(255, 255, 255, 0.25);
+                padding: 0.375rem 0.875rem;
+                border-radius: 50px;
+                margin-left: 0.75rem;
+                letter-spacing: 0.02em;
+                backdrop-filter: blur(10px);
+            }}
+            
+            .collapse-btn {{
+                background: rgba(255, 255, 255, 0.15);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                color: white;
+                width: 40px;
+                height: 40px;
+                border-radius: 10px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: var(--transition);
+                backdrop-filter: blur(10px);
+            }}
+            
+            .collapse-btn:hover {{
+                background: rgba(255, 255, 255, 0.25);
+                transform: scale(1.05);
+            }}
+            
+            .collapse-btn i {{
+                transition: transform 0.3s ease;
+            }}
+            
+            .subject-files {{
+                padding: 1.25rem;
+                background: var(--gray-50);
+            }}
+            
+            .subject-files .file-item {{
+                margin-bottom: 1rem;
+            }}
+            
+            .subject-files .file-item:last-child {{
+                margin-bottom: 0;
+            }}
+            
+            .loading {{
+                text-align: center;
+                padding: 3rem;
+                color: #718096;
+            }}
+            
+            .spinner {{
+                border: 3px solid #f3f4f6;
+                border-top: 3px solid #667eea;
+                border-radius: 50%;
+                width: 40px;
+                height: 40px;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 1rem;
+            }}
+            
+            @keyframes spin {{
+                0% {{ transform: rotate(0deg); }}
+                100% {{ transform: rotate(360deg); }}
+            }}
+            
+            @media (max-width: 768px) {{
+                .header h1 {{ font-size: 1.8rem; }}
+                .file-item {{ grid-template-columns: auto 1fr; }}
+                .file-size, .download-btn {{ grid-column: 2; justify-self: end; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <!-- Professional Header with Logo -->
+            <div class="header">
+                <div class="header-top">
+                    <div class="header-title">
+                        <div class="logo">
+                            <i class="fas fa-graduation-cap"></i>
+                        </div>
+                        <div>
+                            <h1>IUMS Lecture Portal</h1>
+                            <div class="header-subtitle">Awrosoft Hevra - Academic Year 2025/2026</div>
+                        </div>
+                    </div>
+                    <div class="year-badge">
+                        <i class="fas fa-calendar-alt"></i>
+                        2025-2026
+                    </div>
+                </div>
+                
+                <!-- Modern Stats Cards -->
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-file-alt"></i>
+                        </div>
+                        <div>
+                            <div class="stat-label">Total Lectures</div>
+                            <div class="stat-value" id="totalFiles">-</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-database"></i>
+                        </div>
+                        <div>
+                            <div class="stat-label">Storage Used</div>
+                            <div class="stat-value" id="totalSize">-</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-layer-group"></i>
+                        </div>
+                        <div>
+                            <div class="stat-label">Subjects</div>
+                            <div class="stat-value" id="totalSubjects">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Modern Toolbar -->
+            <div class="toolbar">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="searchInput" placeholder="Search lectures by name, subject, or file type...">
+                </div>
+                <button class="sync-btn" onclick="syncNow()" id="syncBtn">
+                    <i class="fas fa-sync-alt"></i>
+                    <span>Sync Now</span>
+                </button>
+                <div class="info-badge">
+                    <i class="fas fa-info-circle"></i>
+                    Auto-sync: Disabled
+                </div>
+            </div>
+            
+            <!-- Files Grid -->
+            <div id="fileGrid">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading lectures...</p>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            let allFiles = [];
+            
+            function getFileIcon(filename) {{
+                const ext = filename.split('.').pop().toLowerCase();
+                const iconMap = {{
+                    'pdf': {{ class: 'pdf', icon: 'fa-file-pdf' }},
+                    'doc': {{ class: 'doc', icon: 'fa-file-word' }},
+                    'docx': {{ class: 'doc', icon: 'fa-file-word' }},
+                    'ppt': {{ class: 'ppt', icon: 'fa-file-powerpoint' }},
+                    'pptx': {{ class: 'ppt', icon: 'fa-file-powerpoint' }},
+                    'zip': {{ class: 'zip', icon: 'fa-file-zipper' }},
+                    'rar': {{ class: 'zip', icon: 'fa-file-zipper' }},
+                    'mp4': {{ class: 'video', icon: 'fa-file-video' }},
+                    'avi': {{ class: 'video', icon: 'fa-file-video' }},
+                    'mkv': {{ class: 'video', icon: 'fa-file-video' }},
+                }};
+                return iconMap[ext] || {{ class: 'default', icon: 'fa-file' }};
+            }}
+            
+            function formatSize(bytes) {{
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }}
+            
+            function formatDate(dateString) {{
+                const date = new Date(dateString);
+                const now = new Date();
+                const diff = now - date;
+                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                
+                if (days === 0) return 'Today';
+                if (days === 1) return 'Yesterday';
+                if (days < 7) return days + ' days ago';
+                return date.toLocaleDateString();
+            }}
+            
+            function renderFiles(filesBySubject) {{
+                const grid = document.getElementById('fileGrid');
+                
+                const subjects = Object.keys(filesBySubject);
+                if (subjects.length === 0) {{
+                    grid.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-inbox"></i>
+                            <h3>No lectures found</h3>
+                            <p>Waiting for the next sync cycle to download new materials...</p>
+                        </div>
+                    `;
+                    return;
+                }}
+                
+                let html = '';
+                for (const subject of subjects.sort()) {{
+                    const files = filesBySubject[subject];
+                    html += `
+                        <div class="subject-section">
+                            <div class="subject-header">
+                                <h3 class="subject-title">
+                                    <i class="fas fa-book"></i> ${{subject}}
+                                    <span class="file-count">${{files.length}} file${{files.length !== 1 ? 's' : ''}}</span>
+                                </h3>
+                                <button class="collapse-btn" onclick="toggleSubject(this)">
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                            </div>
+                            <div class="subject-files">
+                                ${{files.map(file => {{
+                                    const icon = getFileIcon(file.name);
+                                    return `
+                                        <div class="file-item">
+                                            <div class="file-icon ${{icon.class}}">
+                                                <i class="fas ${{icon.icon}}"></i>
+                                            </div>
+                                            <div class="file-info">
+                                                <div class="file-name">${{file.name}}</div>
+                                                <div class="file-meta">
+                                                    <i class="fas fa-calendar"></i> ${{formatDate(file.modified)}}
+                                                </div>
+                                            </div>
+                                            <div class="file-size">${{formatSize(file.size_bytes)}}</div>
+                                            <a href="${{file.url}}" class="download-btn" download>
+                                                <i class="fas fa-download"></i> Download
+                                            </a>
+                                        </div>
+                                    `;
+                                }}).join('')}}
+                            </div>
+                        </div>
+                    `;
+                }}
+                
+                grid.innerHTML = html;
+            }}
+            
+            function toggleSubject(btn) {{
+                const section = btn.closest('.subject-section');
+                const filesDiv = section.querySelector('.subject-files');
+                const icon = btn.querySelector('i');
+                
+                if (filesDiv.style.display === 'none') {{
+                    filesDiv.style.display = 'block';
+                    icon.style.transform = 'rotate(0deg)';
+                }} else {{
+                    filesDiv.style.display = 'none';
+                    icon.style.transform = 'rotate(-90deg)';
+                }}
+            }}
+            
+            function updateStats(filesBySubject) {{
+                let totalFiles = 0;
+                let totalBytes = 0;
+                const subjectCount = Object.keys(filesBySubject).length;
+                
+                for (const files of Object.values(filesBySubject)) {{
+                    totalFiles += files.length;
+                    totalBytes += files.reduce((sum, f) => sum + f.size_bytes, 0);
+                }}
+                
+                document.getElementById('totalFiles').textContent = totalFiles;
+                document.getElementById('totalSize').textContent = formatSize(totalBytes);
+                document.getElementById('totalSubjects').textContent = subjectCount;
+            }}
+            
+            async function loadFiles() {{
+                try {{
+                    const res = await fetch('/api/files');
+                    allFiles = await res.json();
+                    renderFiles(allFiles);
+                    updateStats(allFiles);
+                }} catch (error) {{
+                    console.error('Failed to load files:', error);
+                    document.getElementById('fileGrid').innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Error loading lectures</h3>
+                            <p>Please refresh the page or contact support.</p>
+                        </div>
+                    `;
+                }}
+            }}
+            
+            document.getElementById('searchInput').addEventListener('input', (e) => {{
+                const query = e.target.value.toLowerCase();
+                const filtered = {{}};
+                
+                for (const [subject, files] of Object.entries(allFiles)) {{
+                    const matchingFiles = files.filter(f => 
+                        f.name.toLowerCase().includes(query)
+                    );
+                    if (matchingFiles.length > 0) {{
+                        filtered[subject] = matchingFiles;
+                    }}
+                }}
+                
+                renderFiles(filtered);
+            }});
+            
+            document.addEventListener('DOMContentLoaded', loadFiles);
+            setInterval(loadFiles, 300000); // Refresh every 5 minutes
+            
+            async function syncNow() {{
+                const btn = document.getElementById('syncBtn');
+                const icon = btn.querySelector('i');
+                
+                btn.disabled = true;
+                icon.classList.add('fa-spin');
+                btn.innerHTML = '<i class="fas fa-sync fa-spin"></i> Syncing...';
+                
+                try {{
+                    const res = await fetch('/api/sync-now', {{ method: 'POST' }});
+                    const data = await res.json();
+                    
+                    if (data.success) {{
+                        alert('✅ Sync completed! ' + data.message);
+                        await loadFiles();
+                    }} else {{
+                        alert('❌ Sync failed: ' + data.error);
+                    }}
+                }} catch (error) {{
+                    alert('❌ Error: ' + error.message);
+                }} finally {{
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-sync"></i> Sync Now';
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(html)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
