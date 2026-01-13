@@ -126,45 +126,33 @@ def fetch_timeline_with_subjects(session: requests.Session) -> dict:
         raise RuntimeError(f"Sessions API returned {response.status_code}: {response.text[:200]}")
 
     soup = BeautifulSoup(response.text, 'html.parser')
-    subjects_data = {}
+    
+    # Extract all file IDs from 2025-2026 year section ONLY
+    # Use a set to avoid duplicates
+    all_file_ids = set()
     
     # Find 2025-2026 year section
     for year_section in soup.find_all('span', class_='float-left font-weight-bold'):
         year_text = year_section.get_text(strip=True)
+        # ONLY process 2025-2026 academic year
         if '2025-2026' in year_text:
+            logger.info("Found academic year section: %s", year_text)
             card = year_section.find_parent('div', class_='card')
             if card:
-                # Try multiple strategies to find subject headers (h6, h5, div with specific classes)
-                subject_headers = (
-                    card.find_all('h6', class_='text-primary') or
-                    card.find_all('h6') or
-                    card.find_all('h5') or
-                    card.find_all('div', class_='subject-header')
-                )
-                
-                if subject_headers:
-                    for subject_header in subject_headers:
-                        subject_name = subject_header.get_text(strip=True)
-                        # Find the parent that contains files for this subject
-                        subject_container = subject_header.find_parent('div', class_='card-body')
-                        if subject_container:
-                            # Extract file IDs from this subject
-                            download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
-                            matches = re.findall(download_pattern, str(subject_container))
-                            if matches:
-                                subjects_data[subject_name] = matches
-                                logger.info("Found %d files in subject: %s", len(matches), subject_name)
-                else:
-                    # If no subject headers found, extract all IDs from the card
-                    logger.warning("No subject headers found, extracting all IDs from 2025-2026 card")
-                    download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
-                    matches = re.findall(download_pattern, str(card))
-                    if matches:
-                        subjects_data['General'] = matches
-                        logger.info("Found %d files in General category", len(matches))
+                # Extract all download links from this year's card
+                download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
+                matches = re.findall(download_pattern, str(card))
+                all_file_ids.update(matches)
+                logger.info("Extracted %d unique file IDs from %s", len(matches), year_text)
     
-    logger.info("Total subjects: %d", len(subjects_data))
-    return subjects_data
+    if not all_file_ids:
+        logger.warning("No files found in 2025-2026 academic year")
+        return {}
+    
+    # Return as dict with single "2025-2026" category containing unique IDs
+    result = {"2025-2026 Academic Year": list(all_file_ids)}
+    logger.info("Total unique files for 2025-2026: %d", len(all_file_ids))
+    return result
 
 
 def _resolve_filename(response: requests.Response, item_id: str) -> str:
