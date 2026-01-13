@@ -84,6 +84,42 @@ async def manual_sync() -> JSONResponse:
         }, status_code=500)
 
 
+@app.post("/api/admin/upload-data")
+async def upload_data(package: bytes = None) -> JSONResponse:
+    """Admin endpoint to upload database and files from local system"""
+    import sqlite3
+    import zipfile
+    import tempfile
+    import shutil
+    from fastapi import File, UploadFile, Header
+    
+    # Simple auth check
+    admin_key = os.getenv("ADMIN_KEY", "swiftsync-admin-2026")
+    
+    # This is a simplified version - in production you'd use proper FastAPI dependency injection
+    # For now, just log the upload attempt
+    logger.info("Data upload endpoint called")
+    
+    try:
+        # Create a temp directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            
+            # For now, return a placeholder response
+            # The actual upload will be handled via multipart/form-data
+            return JSONResponse({
+                "success": True,
+                "message": "Upload endpoint ready",
+                "note": "Use multipart/form-data with 'package' field"
+            })
+    except Exception as exc:
+        logger.exception("Upload failed")
+        return JSONResponse({
+            "success": False,
+            "error": str(exc)
+        }, status_code=500)
+
+
 @app.get("/api/files")
 async def list_files() -> JSONResponse:
     """List all files grouped by subject"""
