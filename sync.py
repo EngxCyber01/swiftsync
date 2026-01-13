@@ -127,7 +127,6 @@ def fetch_timeline_with_subjects(session: requests.Session) -> dict:
 
     soup = BeautifulSoup(response.text, 'html.parser')
     subjects_data = {}
-    seen_file_ids = set()
     
     # Find 2025-2026 year section
     for year_section in soup.find_all('span', class_='float-left font-weight-bold'):
@@ -139,60 +138,71 @@ def fetch_timeline_with_subjects(session: requests.Session) -> dict:
         card = year_section.find_parent('div', class_='card')
         if not card:
             continue
-            
-        # Find all subject headers
-        all_p_tags = card.find_all('p')
+        
+        # Use regex on the HTML string to extract subjects and their file IDs
+        card_html = str(card)
         download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
         
-        for p_tag in all_p_tags:
-            classes = p_tag.get('class', [])
-            # Must have all three classes
-            if not ('m-0' in classes and 'float-left' in classes and 'font-weight-bold' in classes):
-                continue
-                
-            subject_name = p_tag.get_text(strip=True)
-            
-            # Skip semester headers and empty
-            if not subject_name or len(subject_name) < 5:
-                continue
-            if subject_name in ['Fall Semester', 'Spring Semester', 'Summer Semester']:
-                continue
-            
-            # Get HTML from this subject to next subject
-            sibling_html = str(p_tag)
-            current_elem = p_tag
-            
-            for _ in range(100):
-                next_elem = current_elem.find_next_sibling()
-                if not next_elem:
-                    break
-                    
-                # Stop at next subject header
-                if next_elem.name == 'p':
-                    next_classes = next_elem.get('class', [])
-                    if 'm-0' in next_classes and 'float-left' in next_classes and 'font-weight-bold' in next_classes:
-                        break
-                
-                sibling_html += str(next_elem)
-                current_elem = next_elem
-            
-            # Extract file IDs
-            matches = re.findall(download_pattern, sibling_html)
-            new_matches = [m for m in matches if m not in seen_file_ids]
-            
-            if new_matches:
-                subjects_data[subject_name] = new_matches
-                seen_file_ids.update(new_matches)
-                logger.info("Found %d unique files in subject: %s", len(new_matches), subject_name)
+        # Split by subject headers: <p class="m-0 float-left font-weight-bold">SUBJECT_NAME</p>
+        # Pattern to find subject headers
+        subject_pattern = r'<p class="m-0 float-left font-weight-bold">([^<]+)</p>'
         
-        # If no subjects found, use fallback
-        if not subjects_data:
-            logger.warning("No subjects found, using fallback extraction")
-            all_matches = re.findall(download_pattern, str(card))
-            subjects_data['All Lectures'] = list(set(all_matches))
+        # Find all subject headers with their positions
+        subject_matches = list(re.finditer(subject_pattern, card_html))
+        
+        if not subject_matches:
+            logger.warning("No subject headers found, using fallback")
+            all_file_ids = re.findall(download_pattern, card_html)
+            subjects_data['All Lectures'] = list(set(all_file_ids))
             logger.info("Found %d files in fallback mode", len(subjects_data['All Lectures']))
+        else:
+            seen_file_ids = set()
+            
+            for i, match in enumerate(subject_matches):
+                subject_name = match.group(1).strip()
+                
+                # Skip semester headers
+                if subject_name in ['Fall Semester', 'Spring Semester', 'Summer Semester'] or len(subject_name) < 5:
+                    continue
+                
+                # Get HTML between this subject and the next one
+                start_pos = match.end()
+                if i + 1 < len(subject_matches):
+                    # Find the next valid subject (not a semester header)
+                    next_pos = None
+                    for j in range(i + 1, len(subject_matches)):
+                        next_subject = subject_matches[j].group(1).strip()
+                        if next_subject not in ['Fall Semester', 'Spring Semester', 'Summer Semester'] and len(next_subject) >= 5:
+                            next_pos = subject_matches[j].start()
+                            break
+                    if next_pos:
+                        end_pos = next_pos
+                    else:
+                        end_pos = len(card_html)
+                else:
+                    end_pos = len(card_html)
+                
+                # Extract file IDs from this subject's section
+                subject_html = card_html[start_pos:end_pos]
+                file_ids = re.findall(download_pattern, subject_html)
+                
+                # Remove duplicates
+                unique_file_ids = [fid for fid in file_ids if fid not in seen_file_ids]
+                
+                if unique_file_ids:
+                    subjects_data[subject_name] = unique_file_ids
+                    seen_file_ids.update(unique_file_ids)
+                    logger.info("Found %d unique files in subject: %s", len(unique_file_ids), subject_name)
+            
+            if not subjects_data:
+                # Fallback if no valid subjects found
+                logger.warning("No valid subjects found, using fallback")
+                all_file_ids = re.findall(download_pattern, card_html)
+                subjects_data['All Lectures'] = list(set(all_file_ids))
+                logger.info("Found %d files in fallback mode", len(subjects_data['All Lectures']))
     
-    logger.info("Total subjects: %d, Total unique files: %d", len(subjects_data), len(seen_file_ids) if seen_file_ids else sum(len(v) for v in subjects_data.values()))
+    total_files = sum(len(v) for v in subjects_data.values())
+    logger.info("Total subjects: %d, Total files: %d", len(subjects_data), total_files)
     return subjects_data
 
 

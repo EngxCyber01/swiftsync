@@ -179,6 +179,22 @@ async def dashboard() -> HTMLResponse:
         <style>
             * {{ margin: 0; padding: 0; box-sizing: border-box; }}
             
+            /* Remove all focus outlines globally */
+            *, *:focus, *:active {{
+                outline: none !important;
+                -webkit-tap-highlight-color: transparent;
+            }}
+            
+            /* Remove focus ring from buttons, cards, and clickable elements */
+            button:focus, button:active,
+            .download-btn:focus, .download-btn:active,
+            .sync-btn:focus, .sync-btn:active,
+            .subject-header:focus, .subject-header:active,
+            .file-item:focus, .file-item:active {{
+                outline: none !important;
+                box-shadow: none !important;
+            }}
+            
             :root {{
                 --bg-primary: #0a0a0a;
                 --bg-secondary: #111111;
