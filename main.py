@@ -4774,9 +4774,20 @@ async def dashboard() -> HTMLResponse:
                 console.log('📱 Device:', navigator.userAgent.includes('Mobile') ? 'Mobile' : 'Desktop');
                 console.log('🔐 Attendance Token:', attendanceSessionToken ? 'Present' : 'None');
                 
-                // Auto-check for saved attendance session
-                if (attendanceSessionToken) {{
-                    console.log('🔄 Found saved attendance session, verifying...');
+                // Auto-restore attendance session on page load
+                if (attendanceSessionToken && !isSessionExpired()) {{
+                    console.log('🔄 Found valid attendance session, auto-logging in...');
+                    // Switch to attendance zone and load data
+                    setTimeout(() => {{
+                        switchZone('attendance');
+                    }}, 500); // Small delay to ensure DOM is ready
+                }} else if (attendanceSessionToken && isSessionExpired()) {{
+                    console.log('⚠️ Session expired, clearing...');
+                    // Clear expired session
+                    attendanceSessionToken = null;
+                    safeStorage.removeItem('attendance_session_token');
+                    safeStorage.removeItem('attendance_username');
+                    safeStorage.removeItem('attendance_session_timestamp');
                 }}
             }});
         </script>
