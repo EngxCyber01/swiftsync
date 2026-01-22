@@ -25,7 +25,8 @@ def init_security_tables():
                 timestamp TEXT NOT NULL,
                 action_performed TEXT NOT NULL,
                 user_agent TEXT,
-                path TEXT
+                path TEXT,
+                username TEXT
             )
         """)
         
@@ -53,15 +54,15 @@ def init_security_tables():
         conn.commit()
 
 
-def log_visitor(ip_address: str, action: str, user_agent: str = None, path: str = None):
-    """Log a visitor action"""
+def log_visitor(ip_address: str, action: str, user_agent: str = None, path: str = None, username: str = None):
+    """Log a visitor action with optional username/student info"""
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO visitor_logs (ip_address, timestamp, action_performed, user_agent, path)
-                VALUES (?, ?, ?, ?, ?)
-            """, (ip_address, datetime.now().isoformat(), action, user_agent, path))
+                INSERT INTO visitor_logs (ip_address, timestamp, action_performed, user_agent, path, username)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (ip_address, datetime.now().isoformat(), action, user_agent, path, username))
             conn.commit()
     except Exception as e:
         print(f"Error logging visitor: {e}")
@@ -101,11 +102,11 @@ def unblock_ip(ip_address: str):
 
 
 def get_recent_visitors(limit: int = 100) -> List[Dict]:
-    """Get recent visitor logs"""
+    """Get recent visitor logs with username/student info"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, ip_address, timestamp, action_performed, user_agent, path
+            SELECT id, ip_address, timestamp, action_performed, user_agent, path, username
             FROM visitor_logs
             ORDER BY timestamp DESC
             LIMIT ?
@@ -119,7 +120,8 @@ def get_recent_visitors(limit: int = 100) -> List[Dict]:
                 "timestamp": row[2],
                 "action": row[3],
                 "user_agent": row[4],
-                "path": row[5]
+                "path": row[5],
+                "username": row[6] if row[6] else "N/A"
             }
             for row in rows
         ]

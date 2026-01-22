@@ -91,6 +91,32 @@ static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory="static", html=False), name="static")
 
 
+def get_real_client_ip(request: Request) -> str:
+    """
+    Get the real client IP address from request, handling all proxy headers.
+    Checks multiple headers in order of reliability.
+    """
+    # Check proxy headers in order of preference
+    # 1. CF-Connecting-IP (Cloudflare)
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip.strip()
+    
+    # 2. X-Real-IP (Nginx, other proxies)
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
+    
+    # 3. X-Forwarded-For (most common, can have multiple IPs)
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # Take the first IP (client IP)
+        return forwarded_for.split(",")[0].strip()
+    
+    # 4. Fallback to direct connection IP
+    return request.client.host if request.client else "unknown"
+
+
 # Security Middleware - IP Blocking
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
@@ -98,11 +124,8 @@ async def security_middleware(request: Request, call_next):
     Security middleware to block blacklisted IPs and log visitors
     Optimized for performance with minimal overhead
     """
-    # Get client IP (handle proxy headers)
-    client_ip = request.client.host
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
+    # Get real client IP (handle all proxy headers)
+    client_ip = get_real_client_ip(request)
     
     # Continue processing request
     response = await call_next(request)
@@ -124,11 +147,8 @@ async def visitor_tracking_middleware(request: Request, call_next):
     """
     Separate middleware for visitor tracking and security checks
     """
-    # Get client IP
-    client_ip = request.client.host
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        client_ip = forwarded_for.split(",")[0].strip()
+    # Get real client IP (handle all proxy headers)
+    client_ip = get_real_client_ip(request)
     
     # Allow admin portal access with correct key even if IP is blocked
     if request.url.path.startswith("/admin-portal"):
@@ -575,12 +595,16 @@ async def summarize_subject(subject: str) -> JSONResponse:
 # ========================================
 
 @app.post("/api/attendance/login")
-async def attendance_login(username: str, password: str) -> JSONResponse:
+async def attendance_login(request: Request, username: str, password: str) -> JSONResponse:
     """
     Authenticate user for attendance access
     Creates a secure session token
     """
     try:
+        # Get real client IP
+        client_ip = get_real_client_ip(request)
+        user_agent = request.headers.get("User-Agent", "Unknown")
+        
         # Validate credentials
         if not username or not password:
             return JSONResponse({
@@ -591,6 +615,17 @@ async def attendance_login(username: str, password: str) -> JSONResponse:
         result = await attendance_service.authenticate_user(username, password)
         
         if result['success']:
+            # Log successful attendance login with student info
+            student_display = result.get('username', username)
+            db.log_visitor(
+                client_ip, 
+                f"Attendance Login: {student_display}",
+                user_agent,
+                "/api/attendance/login",
+                username=student_display
+            )
+            logger.info(f"✅ Attendance login successful: {student_display} from IP {client_ip}")
+            
             return JSONResponse({
                 "success": True,
                 "session_token": result['session_token'],
@@ -599,7 +634,15 @@ async def attendance_login(username: str, password: str) -> JSONResponse:
             })
         else:
             error_msg = result.get('error', 'Authentication failed')
-            logger.error(f"Authentication failed for {username}: {error_msg}")
+            # Log failed login attempt
+            db.log_visitor(
+                client_ip,
+                f"Failed Attendance Login: {username}",
+                user_agent,
+                "/api/attendance/login",
+                username=username
+            )
+            logger.error(f"❌ Authentication failed for {username} from IP {client_ip}: {error_msg}")
             return JSONResponse({
                 "success": False,
                 "error": error_msg
@@ -614,13 +657,14 @@ async def attendance_login(username: str, password: str) -> JSONResponse:
 
 
 @app.get("/api/attendance/data")
-async def get_attendance(session_token: str) -> JSONResponse:
+async def get_attendance(request: Request, session_token: str) -> JSONResponse:
     """
     Fetch attendance data for authenticated user
     Requires valid session token from login
     """
     try:
-        logger.info("Fetching attendance for session token: %s", session_token[:20])
+        client_ip = get_real_client_ip(request)
+        logger.info("Fetching attendance for session token: %s from IP: %s", session_token[:20], client_ip)
         result = await attendance_service.get_attendance(session_token)
         logger.info("Attendance result: success=%s, error=%s", result.get('success'), result.get('error'))
         
@@ -1569,6 +1613,7 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                         <thead>
                             <tr>
                                 <th>IP Address</th>
+                                <th>Student/User</th>
                                 <th>Timestamp</th>
                                 <th>Action</th>
                                 <th>User Agent</th>
@@ -1579,6 +1624,7 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                             {"".join([f'''
                             <tr>
                                 <td><span class="ip-address">{visitor['ip_address']}</span></td>
+                                <td><span class="action-badge" style="background: rgba(34, 139, 34, 0.1); color: var(--kurdish-green);">{visitor.get('username', 'N/A')}</span></td>
                                 <td class="timestamp">{visitor['timestamp']}</td>
                                 <td><span class="action-badge">{visitor['action']}</span></td>
                                 <td class="timestamp">{visitor['user_agent'][:50] if visitor['user_agent'] else 'N/A'}...</td>
@@ -4098,6 +4144,23 @@ async def dashboard() -> HTMLResponse:
             let attendanceUsername = localStorage.getItem('attendance_username') || null;
             let attendanceRefreshInterval = null;
             
+            // Session management - 7 days expiration
+            const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+            
+            // Check if session is expired
+            function isSessionExpired() {{
+                const sessionTimestamp = localStorage.getItem('attendance_session_timestamp');
+                if (!sessionTimestamp) return true;
+                
+                const elapsed = Date.now() - parseInt(sessionTimestamp);
+                return elapsed > SESSION_DURATION;
+            }}
+            
+            // Update session timestamp
+            function updateSessionTimestamp() {{
+                localStorage.setItem('attendance_session_timestamp', Date.now().toString());
+            }}
+            
             // PWA install prompt
             let deferredPrompt = null;
             
@@ -4127,10 +4190,19 @@ async def dashboard() -> HTMLResponse:
             // ===================================
             
             function checkAttendanceSession() {{
+                // Check if session is expired
+                if (attendanceSessionToken && isSessionExpired()) {{
+                    console.log('Session expired, clearing...');
+                    // Clear expired session
+                    attendanceSessionToken = null;
+                    localStorage.removeItem('attendance_session_token');
+                    localStorage.removeItem('attendance_session_timestamp');
+                }}
+                
                 // Check for saved credentials (encrypted in base64)
                 const savedCreds = localStorage.getItem('attendance_credentials');
                 
-                if (savedCreds) {{
+                if (savedCreds && !attendanceSessionToken) {{
                     // Auto-fill and auto-login
                     try {{
                         const creds = JSON.parse(atob(savedCreds));
@@ -4144,9 +4216,13 @@ async def dashboard() -> HTMLResponse:
                         }}, 100);
                     }} catch (e) {{
                         console.error('Failed to load saved credentials');
+                        // Show login form
+                        document.getElementById('attendanceLoginArea').style.display = 'block';
+                        document.getElementById('attendanceDataArea').style.display = 'none';
                     }}
                 }} else if (attendanceSessionToken) {{
-                    // User has a session, try to load attendance data
+                    // User has a valid session, try to load attendance data
+                    updateSessionTimestamp(); // Refresh session
                     loadAttendanceData();
                 }} else {{
                     // Show login form
@@ -4209,6 +4285,9 @@ async def dashboard() -> HTMLResponse:
                         localStorage.setItem('attendance_session_token', attendanceSessionToken);
                         localStorage.setItem('attendance_username', attendanceUsername);
                         
+                        // Set session timestamp (7 days expiration)
+                        updateSessionTimestamp();
+                        
                         // Save credentials if remember me is checked (encrypted)
                         if (rememberMe) {{
                             const creds = btoa(JSON.stringify({{ u: username, p: password }}));
@@ -4222,6 +4301,8 @@ async def dashboard() -> HTMLResponse:
                         
                         // Start auto-refresh
                         startAttendanceAutoRefresh();
+                        
+                        console.log('✅ Login successful - session valid for 7 days');
                     }} else {{
                         alert(`Login failed: ${{result.error}}`);
                         // Reset button
@@ -4437,6 +4518,9 @@ async def dashboard() -> HTMLResponse:
                     const attendanceResult = await attendanceResponse.json();
                     
                     if (attendanceResult.success) {{
+                        // Refresh session timestamp on successful data load
+                        updateSessionTimestamp();
+                        
                         // Try to fetch profile (but don't fail if it doesn't work)
                         let fullName = attendanceUsername;
                         
@@ -4515,6 +4599,7 @@ async def dashboard() -> HTMLResponse:
                 localStorage.removeItem('attendance_session_token');
                 localStorage.removeItem('attendance_username');
                 localStorage.removeItem('attendance_credentials');
+                localStorage.removeItem('attendance_session_timestamp');
                 
                 // Reset form
                 document.getElementById('attendanceLoginForm').reset();
