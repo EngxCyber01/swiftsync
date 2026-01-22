@@ -85,6 +85,13 @@ class AttendanceService:
         Returns: {success: bool, session_token: str, error: str, student_id: str}
         """
         try:
+            # Validate inputs
+            if not username or not password:
+                return {
+                    'success': False,
+                    'error': 'Username and password are required'
+                }
+            
             # Create a new auth client for this user
             auth_config = AuthConfig()
             auth_config.username = username
@@ -92,12 +99,31 @@ class AttendanceService:
             auth_client = AuthClient(auth_config)
             
             # Authenticate using existing auth.py
-            result = await asyncio.to_thread(auth_client.login)
+            try:
+                result = await asyncio.to_thread(auth_client.login)
+            except ValueError as ve:
+                # Catch credential validation errors
+                return {
+                    'success': False,
+                    'error': 'Portal credentials not configured. Please contact administrator.'
+                }
+            except Exception as auth_exc:
+                # Catch authentication failures
+                error_msg = str(auth_exc)
+                if 'credentials' in error_msg.lower() or 'username' in error_msg.lower():
+                    return {
+                        'success': False,
+                        'error': 'Invalid credentials. Please check your username and password.'
+                    }
+                return {
+                    'success': False,
+                    'error': f'Authentication failed: {error_msg}'
+                }
             
             if not auth_client.session:
                 return {
                     'success': False,
-                    'error': 'Authentication failed'
+                    'error': 'Authentication failed. Please check your credentials.'
                 }
             
             # Extract student ID and cookies
@@ -121,7 +147,7 @@ class AttendanceService:
         except Exception as e:
             return {
                 'success': False,
-                'error': f'Authentication error: {str(e)}'
+                'error': f'Login error: {str(e)}'
             }
     
     async def get_student_profile(self, session_token: str) -> Dict[str, Any]:

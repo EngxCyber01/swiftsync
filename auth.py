@@ -22,17 +22,15 @@ class AuthConfig:
     verify_ssl: bool = True
     
     def __post_init__(self):
-        """Validate credentials are set"""
-        if not self.username or not self.password:
-            missing = []
-            if not self.username:
-                missing.append("PORTAL_USERNAME")
-            if not self.password:
-                missing.append("PORTAL_PASSWORD")
-            raise ValueError(
-                f"Missing credentials: {', '.join(missing)}. "
-                f"Set PORTAL_USERNAME and PORTAL_PASSWORD in .env file."
-            )
+        """Validate credentials are set only if neither username nor password is provided"""
+        # Only validate if BOTH are empty (allows dynamic username/password from login form)
+        if not self.username and not self.password:
+            # Check if environment variables exist
+            if not os.getenv("PORTAL_USERNAME") and not os.getenv("PORTAL_PASSWORD"):
+                raise ValueError(
+                    "Missing credentials: PORTAL_USERNAME and PORTAL_PASSWORD. "
+                    "Set in .env file or provide username/password directly."
+                )
 
 
 class AuthError(Exception):

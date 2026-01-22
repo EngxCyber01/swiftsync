@@ -564,6 +564,13 @@ async def attendance_login(username: str, password: str) -> JSONResponse:
     Creates a secure session token
     """
     try:
+        # Validate credentials
+        if not username or not password:
+            return JSONResponse({
+                "success": False,
+                "error": "Username and password are required"
+            }, status_code=400)
+        
         result = await attendance_service.authenticate_user(username, password)
         
         if result['success']:
@@ -574,16 +581,18 @@ async def attendance_login(username: str, password: str) -> JSONResponse:
                 "username": result['username']
             })
         else:
+            error_msg = result.get('error', 'Authentication failed')
+            logger.error(f"Authentication failed for {username}: {error_msg}")
             return JSONResponse({
                 "success": False,
-                "error": result.get('error', 'Authentication failed')
+                "error": error_msg
             }, status_code=401)
     
     except Exception as exc:
-        logger.exception("Error during attendance login")
+        logger.exception(f"Error during attendance login for {username}")
         return JSONResponse({
             "success": False,
-            "error": "Login error. Please try again."
+            "error": f"Login error: {str(exc)}"
         }, status_code=500)
 
 
