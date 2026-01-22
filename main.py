@@ -288,20 +288,21 @@ async def sync_worker() -> None:
             added, files, new_item_ids = await asyncio.to_thread(sync_once, auth_client, send_notifications=True)
             
             if new_item_ids:
-                logger.info("✅ Synced %s new file(s), sending notifications for %s", added, len(new_item_ids))
+                logger.info("✅ Synced %s new file(s), sending notifications for %s NEW items", added, len(new_item_ids))
                 
                 # Send Telegram notifications ONLY for items not yet notified
                 try:
                     if len(new_item_ids) == 1 and files:
                         notify_new_lecture(files[0], base_url=BASE_URL)
                         _mark_notified(new_item_ids[0])
+                        logger.info(f"✅ Telegram notification sent for 1 lecture (ID: {new_item_ids[0]})")
                     elif len(new_item_ids) > 1:
                         notify_multiple_lectures(len(new_item_ids))
                         for item_id in new_item_ids:
                             _mark_notified(item_id)
-                    logger.info(f"Telegram notification sent for {len(new_item_ids)} NEW lecture(s)")
+                        logger.info(f"✅ Telegram notification sent for {len(new_item_ids)} lectures (IDs: {new_item_ids})")
                 except Exception as e:
-                    logger.error(f"Failed to send Telegram notification: {e}")
+                    logger.error(f"❌ Failed to send Telegram notification: {e}")
             else:
                 logger.info("✓ No new lectures found")
         except AuthError as exc:
@@ -366,15 +367,16 @@ async def manual_sync() -> JSONResponse:
                     notify_new_lecture(files[0], base_url=BASE_URL)
                     _mark_notified(new_item_ids[0])
                     notifications_sent = 1
+                    logger.info(f"✅ Manual sync: Telegram sent for 1 lecture (ID: {new_item_ids[0]})")
                 elif len(new_item_ids) > 1:
                     # Multiple lectures notification
                     notify_multiple_lectures(len(new_item_ids))
                     for item_id in new_item_ids:
                         _mark_notified(item_id)
                     notifications_sent = len(new_item_ids)
-                logger.info(f"Telegram notification sent for {notifications_sent} NEW lecture(s)")
+                    logger.info(f"✅ Manual sync: Telegram sent for {notifications_sent} lectures (IDs: {new_item_ids})")
             except Exception as e:
-                logger.error(f"Failed to send Telegram notification: {e}")
+                logger.error(f"❌ Manual sync: Failed to send Telegram notification: {e}")
         
         return JSONResponse({
             "success": True,

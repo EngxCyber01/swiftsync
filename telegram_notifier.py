@@ -146,7 +146,8 @@ def notify_new_lecture(
 
 def notify_multiple_lectures(
     file_count: int,
-    subject: Optional[str] = None
+    subject: Optional[str] = None,
+    upload_date: Optional[str] = None
 ) -> bool:
     """
     Send a summary notification when multiple lectures are uploaded
@@ -154,6 +155,7 @@ def notify_multiple_lectures(
     Args:
         file_count: Number of new lectures
         subject: Subject/course name if applicable
+        upload_date: Actual upload date from the platform (not notification time)
     
     Returns:
         True if notification was sent successfully
@@ -161,10 +163,13 @@ def notify_multiple_lectures(
     try:
         subject_info = f" in *{subject}*" if subject else ""
         
+        # Use provided upload date or current time
+        date_str = upload_date if upload_date else datetime.now().strftime("%B %d, %Y at %I:%M %p")
+        
         message = f"""📚 *Multiple New Lectures Uploaded!*
 
 🎓 *Count:* {file_count} new lectures{subject_info}
-📅 *Date:* {datetime.now().strftime("%B %d, %Y at %I:%M %p")}
+📅 *Date:* {date_str}
 
 🚀 Stay focused and happy learning!
 💪 Keep up the great work!"""

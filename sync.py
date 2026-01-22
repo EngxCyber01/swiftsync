@@ -84,7 +84,12 @@ def _was_notified(item_id: str) -> bool:
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute("SELECT last_notified FROM synced_items WHERE id = ?", (item_id,))
         result = cur.fetchone()
-        return result is not None and result[0] is not None
+        was_notified = result is not None and result[0] is not None
+        if was_notified:
+            logger.debug(f"✓ ID {item_id} already notified at {result[0]}")
+        else:
+            logger.debug(f"⚠ ID {item_id} not yet notified")
+        return was_notified
 
 
 def _mark_notified(item_id: str) -> None:
@@ -97,6 +102,7 @@ def _mark_notified(item_id: str) -> None:
             (item_id,)
         )
         conn.commit()
+        logger.info(f"✅ Marked ID {item_id} as notified")
 
 
 def _extract_ids(timeline: Iterable) -> List[str]:

@@ -3,13 +3,18 @@
   "short_name": "SwiftSync",
   "description": "Student lecture management and synchronization system with Google Classroom integration",
   "start_url": "/",
+  "id": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#0a0a0a",
   "theme_color": "#00d9ff",
-  "orientation": "any",
+  "orientation": "portrait-primary",
   "scope": "/",
   "prefer_related_applications": false,
   "categories": ["education", "productivity"],
+  "lang": "en-US",
+  "dir": "ltr",
+  "iarc_rating_id": "e84b072d-71b3-4d3e-86ae-31a8ce4e53b7",
   "icons": [
     {
       "src": "/static/icons/icon-72x72.png",
@@ -60,7 +65,6 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["education", "productivity"],
   "shortcuts": [
     {
       "name": "Dashboard",

@@ -1,6 +1,6 @@
 // SwiftSync Service Worker - PWA Support (PERFORMANCE OPTIMIZED)
-const CACHE_NAME = 'swiftsync-v1.2.0-turbo';
-const RUNTIME_CACHE = 'swiftsync-runtime-v1.2.0';
+const CACHE_NAME = 'swiftsync-v1.3.0-session-fix';
+const RUNTIME_CACHE = 'swiftsync-runtime-v1.3.0';
 
 // Core assets to cache immediately for INSTANT offline loading
 const CORE_ASSETS = [
@@ -14,7 +14,7 @@ const CORE_ASSETS = [
 
 // Install event - cache core assets FAST
 self.addEventListener('install', (event) => {
-  console.log('[Service Worker] Installing TURBO v1.2.0...');
+  console.log('[Service Worker] Installing v1.3.0 with session persistence fix...');
   
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -77,14 +77,22 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(request, {
-        credentials: 'same-origin',  // Include cookies for authentication
+        credentials: 'include',  // Include cookies for authentication (better mobile support)
+        cache: 'no-store',       // Never cache API responses
         headers: request.headers
-      }).catch(() => {
+      }).catch((err) => {
+        console.error('[Service Worker] API request failed:', err);
         return new Response(
-          JSON.stringify({ error: 'Offline - API unavailable' }),
+          JSON.stringify({ 
+            error: 'Offline - API unavailable',
+            message: 'Please check your internet connection'
+          }),
           { 
             status: 503,
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-store'
+            }
           }
         );
       })
@@ -94,12 +102,15 @@ self.addEventListener('fetch', (event) => {
 
   // Auth endpoints - always network, never cache (preserve sessions)
   if (url.pathname.startsWith('/login') || 
+      url.pathname.startsWith('/logout') ||
       url.pathname.startsWith('/check-attendance') ||
       url.pathname.includes('signin')) {
     event.respondWith(
       fetch(request, {
-        credentials: 'same-origin',
-        headers: request.headers
+        credentials: 'include',  // Include cookies
+        cache: 'no-store'        // Never cache auth pages
+      }).catch(() => {
+        return caches.match('/') || new Response('Offline', { status: 503 });
       })
     );
     return;
