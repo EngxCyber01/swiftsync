@@ -1,6 +1,6 @@
-// SwiftSync Service Worker - PWA Support (PERFORMANCE OPTIMIZED)
-const CACHE_NAME = 'swiftsync-v1.3.0-session-fix';
-const RUNTIME_CACHE = 'swiftsync-runtime-v1.3.0';
+// SwiftSync Service Worker - PWA Support (PERFORMANCE OPTIMIZED + SECURITY FIX)
+const CACHE_NAME = 'swiftsync-v1.4.0-security-fix';
+const RUNTIME_CACHE = 'swiftsync-runtime-v1.4.0';
 
 // Core assets to cache immediately for INSTANT offline loading
 const CORE_ASSETS = [
@@ -100,15 +100,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Auth endpoints - always network, never cache (preserve sessions)
+  // Auth and Admin endpoints - NEVER cache, always network
   if (url.pathname.startsWith('/login') || 
       url.pathname.startsWith('/logout') ||
       url.pathname.startsWith('/check-attendance') ||
+      url.pathname.startsWith('/admin-portal') ||
       url.pathname.includes('signin')) {
     event.respondWith(
       fetch(request, {
         credentials: 'include',  // Include cookies
-        cache: 'no-store'        // Never cache auth pages
+        cache: 'no-store'        // Never cache auth/admin pages
       }).catch(() => {
         return caches.match('/') || new Response('Offline', { status: 503 });
       })

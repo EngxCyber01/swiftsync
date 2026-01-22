@@ -67,17 +67,17 @@
   ],
   "shortcuts": [
     {
-      "name": "Dashboard",
-      "short_name": "Dashboard",
-      "description": "View lecture dashboard",
-      "url": "/",
+      "name": "Lectures",
+      "short_name": "Lectures",
+      "description": "View public lectures",
+      "url": "/?zone=lectures",
       "icons": [{ "src": "/static/icons/icon-192x192.png", "sizes": "192x192" }]
     },
     {
-      "name": "Admin Portal",
-      "short_name": "Admin",
-      "description": "Access admin security portal",
-      "url": "/admin-portal?admin_key=emadCyberSoft4SOC",
+      "name": "Attendance",
+      "short_name": "Attendance",
+      "description": "Access attendance system",
+      "url": "/?zone=attendance",
       "icons": [{ "src": "/static/icons/icon-192x192.png", "sizes": "192x192" }]
     }
   ],

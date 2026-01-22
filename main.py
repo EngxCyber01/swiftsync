@@ -43,7 +43,7 @@ else:
 
 # Log admin key for debugging
 if SECRET_ADMIN_KEY:
-    logger.info(f"✓ Admin SOC key loaded: {SECRET_ADMIN_KEY}")
+    logger.info("✓ Admin SOC key configured (hidden for security)")
 else:
     logger.warning("⚠ No admin key found, using default")
 
@@ -1383,8 +1383,15 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                     return;
                 }}
                 
+                // Prompt for admin key (never hardcode it!)
+                const adminKey = prompt('Enter admin key:');
+                if (!adminKey) {{
+                    alert('❌ Admin key required');
+                    return;
+                }}
+                
                 try {{
-                    const response = await fetch('/admin-portal/clear-activity?admin_key=emadCyberSoft4SOC', {{
+                    const response = await fetch(`/admin-portal/clear-activity?admin_key=${{encodeURIComponent(adminKey)}}`, {{
                         method: 'POST'
                     }});
                     const data = await response.json();
