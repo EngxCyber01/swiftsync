@@ -43,10 +43,16 @@ def _init_db() -> None:
                 downloaded_at TEXT DEFAULT (datetime('now')),
                 upload_date TEXT,
                 subject TEXT,
-                filename TEXT
+                filename TEXT,
+                last_notified TEXT
             )
             """
         )
+        # Add last_notified column if it doesn't exist (migration)
+        try:
+            conn.execute("ALTER TABLE synced_items ADD COLUMN last_notified TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         conn.commit()
 
 
@@ -66,6 +72,29 @@ def _mark_seen(item_id: str, subject: str = None, filename: str = None, upload_d
         conn.execute(
             "INSERT OR IGNORE INTO synced_items (id, subject, filename, upload_date) VALUES (?, ?, ?, ?)", 
             (item_id, subject, filename, upload_date)
+        )
+        conn.commit()
+
+
+def _was_notified(item_id: str) -> bool:
+    """
+    Check if Telegram notification was already sent for this lecture.
+    Prevents duplicate notifications when Render wakes from sleep.
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute("SELECT last_notified FROM synced_items WHERE id = ?", (item_id,))
+        result = cur.fetchone()
+        return result is not None and result[0] is not None
+
+
+def _mark_notified(item_id: str) -> None:
+    """
+    Mark that a Telegram notification was sent for this lecture.
+    """
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE synced_items SET last_notified = datetime('now') WHERE id = ?",
+            (item_id,)
         )
         conn.commit()
 
@@ -265,10 +294,21 @@ def download_material(session: requests.Session, item_id: str) -> Tuple[Path, st
     return target, upload_date
 
 
-def sync_once(auth_client: AuthClient) -> Tuple[int, List[Path]]:
+def sync_once(auth_client: AuthClient, send_notifications: bool = True) -> Tuple[int, List[Path], List[str]]:
+    """
+    Sync lectures once.
+    
+    Args:
+        auth_client: Authentication client
+        send_notifications: Whether to track items for notifications (False for silent sync)
+    
+    Returns:
+        Tuple of (new_files_count, new_file_paths, new_item_ids_for_notification)
+    """
     _init_db()
     session = auth_client.get_authenticated_session()
     new_files: List[Path] = []
+    new_item_ids: List[str] = []  # Track IDs for notification
 
     logger.info("Starting sync cycle...")
     
@@ -286,6 +326,9 @@ def sync_once(auth_client: AuthClient) -> Tuple[int, List[Path]]:
                     path, upload_date = download_material(session, item_id)
                     _mark_seen(item_id, subject, path.name, upload_date)
                     new_files.append(path)
+                    # Track for notification only if not already notified
+                    if send_notifications and not _was_notified(item_id):
+                        new_item_ids.append(item_id)
                     logger.info("Successfully downloaded: %s (Upload date: %s)", path.name, upload_date)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Failed to download id=%s: %s", item_id, exc)
@@ -309,12 +352,15 @@ def sync_once(auth_client: AuthClient) -> Tuple[int, List[Path]]:
                 path, upload_date = download_material(session, item_id)
                 _mark_seen(item_id, None, path.name, upload_date)
                 new_files.append(path)
+                # Track for notification only if not already notified
+                if send_notifications and not _was_notified(item_id):
+                    new_item_ids.append(item_id)
                 logger.info("Successfully downloaded: %s (Upload date: %s)", path.name, upload_date)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Failed to download id=%s: %s", item_id, exc)
 
-    logger.info("Sync cycle completed: %d new files downloaded", len(new_files))
-    return len(new_files), new_files
+    logger.info("Sync cycle completed: %d new files downloaded, %d need notification", len(new_files), len(new_item_ids))
+    return len(new_files), new_files, new_item_ids
 
 
 def sync_forever(auth_client: AuthClient) -> None:
@@ -322,7 +368,7 @@ def sync_forever(auth_client: AuthClient) -> None:
 
     while True:
         try:
-            count, files = sync_once(auth_client)
+            count, files, new_ids = sync_once(auth_client)
             logger.info("Sync completed: %d new files downloaded", count)
         except AuthError as exc:
             logger.warning("Authentication failed: %s. Re-authenticating...", exc)

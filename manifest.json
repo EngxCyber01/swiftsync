@@ -8,6 +8,8 @@
   "theme_color": "#00d9ff",
   "orientation": "any",
   "scope": "/",
+  "prefer_related_applications": false,
+  "categories": ["education", "productivity"],
   "icons": [
     {
       "src": "/static/icons/icon-72x72.png",

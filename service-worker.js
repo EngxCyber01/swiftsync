@@ -1,26 +1,38 @@
-// SwiftSync Service Worker - PWA Support
-const CACHE_NAME = 'swiftsync-v1.0.0';
-const RUNTIME_CACHE = 'swiftsync-runtime-v1.0.0';
+// SwiftSync Service Worker - PWA Support (PERFORMANCE OPTIMIZED)
+const CACHE_NAME = 'swiftsync-v1.2.0-turbo';
+const RUNTIME_CACHE = 'swiftsync-runtime-v1.2.0';
 
-// Core assets to cache immediately
+// Core assets to cache immediately for INSTANT offline loading
 const CORE_ASSETS = [
   '/',
   '/manifest.json',
+  '/static/icons/icon-192x192.png',
+  '/static/icons/icon-512x512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
   'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap'
 ];
 
-// Install event - cache core assets
+// Install event - cache core assets FAST
 self.addEventListener('install', (event) => {
-  console.log('[Service Worker] Installing...');
+  console.log('[Service Worker] Installing TURBO v1.2.0...');
   
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
-        console.log('[Service Worker] Caching core assets');
-        return cache.addAll(CORE_ASSETS);
+        console.log('[Service Worker] Caching core assets for instant offline');
+        // Add all assets in parallel for speed, but don't fail if some are missing
+        return Promise.allSettled(
+          CORE_ASSETS.map(url => 
+            cache.add(url).catch(err => {
+              console.warn(`[Service Worker] Failed to cache ${url}:`, err);
+            })
+          )
+        );
       })
-      .then(() => self.skipWaiting())
+      .then(() => {
+        console.log('[Service Worker] Skipping waiting for instant activation');
+        return self.skipWaiting();
+      })
   );
 });
 
@@ -61,10 +73,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // API requests - network only, no cache
+  // API requests - network only, no cache (preserve cookies)
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
-      fetch(request).catch(() => {
+      fetch(request, {
+        credentials: 'same-origin',  // Include cookies for authentication
+        headers: request.headers
+      }).catch(() => {
         return new Response(
           JSON.stringify({ error: 'Offline - API unavailable' }),
           { 
@@ -73,6 +88,43 @@ self.addEventListener('fetch', (event) => {
           }
         );
       })
+    );
+    return;
+  }
+
+  // Auth endpoints - always network, never cache (preserve sessions)
+  if (url.pathname.startsWith('/login') || 
+      url.pathname.startsWith('/check-attendance') ||
+      url.pathname.includes('signin')) {
+    event.respondWith(
+      fetch(request, {
+        credentials: 'same-origin',
+        headers: request.headers
+      })
+    );
+    return;
+  }
+
+  // Static resources (CSS, JS, fonts, images) - CACHE FIRST for instant offline
+  if (url.pathname.match(/\.(css|js|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|webp|ico)$/)) {
+    event.respondWith(
+      caches.match(request)
+        .then((cachedResponse) => {
+          if (cachedResponse) {
+            // Return cached version instantly
+            return cachedResponse;
+          }
+          // Not in cache, fetch and cache it
+          return fetch(request).then((response) => {
+            if (response && response.status === 200) {
+              const responseToCache = response.clone();
+              caches.open(RUNTIME_CACHE).then((cache) => {
+                cache.put(request, responseToCache);
+              });
+            }
+            return response;
+          });
+        })
     );
     return;
   }

@@ -11,18 +11,23 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from auth import AuthClient, AuthConfig, AuthError
-from sync import DOWNLOAD_DIR, SYNC_INTERVAL_SECONDS, sync_once
+from sync import DOWNLOAD_DIR, SYNC_INTERVAL_SECONDS, sync_once, _was_notified, _mark_notified
 from summarizer import summarize_single_lecture, summarize_all_lectures, SummarizationError
 from attendance import attendance_service
 import database as db
-from telegram_notifier import notify_new_lecture, notify_multiple_lectures
 from telegram_notifier import notify_new_lecture, notify_multiple_lectures
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Get base URL from environment or detect from request
+BASE_URL = os.getenv("BASE_URL", "https://swiftsync-013r.onrender.com")
+IS_PRODUCTION = os.getenv("RENDER", "") != ""  # Detect if running on Render
 
 # Debug: Check if API key is loaded
 _gemini_key = os.getenv("GEMINI_API_KEY")
@@ -55,8 +60,26 @@ async def lifespan(app: FastAPI):
     # Shutdown (if needed)
     logger.info("Application shutting down")
 
-app = FastAPI(title="SwiftSync - Lecture Sync Dashboard by SSCreative", lifespan=lifespan)
+app = FastAPI(
+    title="SwiftSync - Lecture Sync Dashboard by SSCreative",
+    lifespan=lifespan,
+    docs_url=None if IS_PRODUCTION else "/docs",  # Disable docs in production for performance
+    redoc_url=None if IS_PRODUCTION else "/redoc"
+)
 auth_client = AuthClient(AuthConfig())
+
+# Add compression for faster data transfer (70% smaller responses)
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
+
+# Add CORS middleware for PWA and mobile support
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for PWA
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
+)
 
 # Ensure the lectures_storage directory exists before mounting
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -76,6 +99,32 @@ async def security_middleware(request: Request, call_next):
     Optimized for performance with minimal overhead
     """
     # Get client IP (handle proxy headers)
+    client_ip = request.client.host
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+    
+    # Continue processing request
+    response = await call_next(request)
+    
+    # Add PWA and mobile-friendly headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    
+    # Allow service worker and manifest to be cached
+    if request.url.path in ["/service-worker.js", "/manifest.json"]:
+        response.headers["Cache-Control"] = "public, max-age=0"
+    
+    return response
+
+
+@app.middleware("http")
+async def visitor_tracking_middleware(request: Request, call_next):
+    """
+    Separate middleware for visitor tracking and security checks
+    """
+    # Get client IP
     client_ip = request.client.host
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
@@ -207,7 +256,7 @@ async def sync_worker() -> None:
     """
     Background worker that syncs lectures periodically.
     Only sends Telegram notifications for NEW lectures (not on every check).
-    Render free tier sleeps, so sync_once() checks database to avoid duplicate alerts.
+    Uses notification tracking to prevent duplicate alerts on Render wake-up.
     """
     # Wait a bit before starting to let the server fully start
     await asyncio.sleep(5)
@@ -216,17 +265,21 @@ async def sync_worker() -> None:
     while True:
         try:
             logger.info("Checking for new lectures...")
-            added, files = await asyncio.to_thread(sync_once, auth_client)
-            if added:
-                logger.info("✅ Synced %s new file(s).", added)
+            added, files, new_item_ids = await asyncio.to_thread(sync_once, auth_client, send_notifications=True)
+            
+            if new_item_ids:
+                logger.info("✅ Synced %s new file(s), sending notifications for %s", added, len(new_item_ids))
                 
-                # Send Telegram notifications ONLY for NEW lectures
+                # Send Telegram notifications ONLY for items not yet notified
                 try:
-                    if added == 1 and files:
-                        notify_new_lecture(files[0], base_url="https://swiftsync-013r.onrender.com")
-                    elif added > 1:
-                        notify_multiple_lectures(added)
-                    logger.info(f"Telegram notification sent for {added} NEW lecture(s)")
+                    if len(new_item_ids) == 1 and files:
+                        notify_new_lecture(files[0], base_url=BASE_URL)
+                        _mark_notified(new_item_ids[0])
+                    elif len(new_item_ids) > 1:
+                        notify_multiple_lectures(len(new_item_ids))
+                        for item_id in new_item_ids:
+                            _mark_notified(item_id)
+                    logger.info(f"Telegram notification sent for {len(new_item_ids)} NEW lecture(s)")
                 except Exception as e:
                     logger.error(f"Failed to send Telegram notification: {e}")
             else:
@@ -282,19 +335,24 @@ async def get_service_worker():
 async def manual_sync() -> JSONResponse:
     """Trigger immediate sync (for testing)"""
     try:
-        added, files = await asyncio.to_thread(sync_once, auth_client)
+        added, files, new_item_ids = await asyncio.to_thread(sync_once, auth_client, send_notifications=True)
         
-        # Send Telegram notifications ONLY for NEW lectures (not on Render wake-up)
-        # The sync_once function already checks if files are new and only returns truly new files
-        if added > 0 and files:
+        # Send Telegram notifications ONLY for items that haven't been notified yet
+        notifications_sent = 0
+        if new_item_ids:
             try:
-                if added == 1:
+                if len(new_item_ids) == 1 and files:
                     # Single lecture notification
-                    notify_new_lecture(files[0], base_url="https://swiftsync-013r.onrender.com")
-                else:
+                    notify_new_lecture(files[0], base_url=BASE_URL)
+                    _mark_notified(new_item_ids[0])
+                    notifications_sent = 1
+                elif len(new_item_ids) > 1:
                     # Multiple lectures notification
-                    notify_multiple_lectures(added)
-                logger.info(f"Telegram notification sent for {added} NEW lecture(s)")
+                    notify_multiple_lectures(len(new_item_ids))
+                    for item_id in new_item_ids:
+                        _mark_notified(item_id)
+                    notifications_sent = len(new_item_ids)
+                logger.info(f"Telegram notification sent for {notifications_sent} NEW lecture(s)")
             except Exception as e:
                 logger.error(f"Failed to send Telegram notification: {e}")
         
@@ -1807,18 +1865,47 @@ async def dashboard() -> HTMLResponse:
         <link rel="manifest" href="/manifest.json">
         <link rel="apple-touch-icon" href="/static/icons/icon-192x192.png">
         
+        <!-- PERFORMANCE: Preconnect to external resources for faster loading -->
+        <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+        <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+        <link rel="dns-prefetch" href="https://fonts.googleapis.com">
+        
+        <!-- PERFORMANCE: Preload critical resources -->
+        <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" as="style">
+        <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" as="style">
+        
+        <!-- Load CSS -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
         <style>
-            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            /* ========================================
+               PERFORMANCE OPTIMIZATIONS
+               ======================================== */
             
-            /* Remove all focus outlines globally */
-            *, *:focus, *:active {{
-                outline: none !important;
-                -webkit-tap-highlight-color: transparent;
+            * {{ 
+                margin: 0; 
+                padding: 0; 
+                box-sizing: border-box;
             }}
             
-            /* Remove focus ring from buttons, cards, and clickable elements */
+            /* ULTRA-RESPONSIVE: Remove ALL delays and enable instant feedback */
+            *, *:focus, *:active {{
+                outline: none !important;
+                -webkit-tap-highlight-color: transparent;  /* No iOS tap delay */
+                -webkit-touch-callout: none;  /* Disable iOS callout */
+            }}
+            
+            /* GPU acceleration for smooth animations */
+            button, .sync-btn, .download-btn, .subject-header, .file-item {{
+                -webkit-transform: translateZ(0);  /* Force GPU rendering */
+                transform: translateZ(0);
+                backface-visibility: hidden;  /* Smoother animations */
+                will-change: transform, opacity;  /* Optimize for changes */
+            }}
+            
+            /* Remove focus ring from buttons for instant feel */
             button:focus, button:active,
             .download-btn:focus, .download-btn:active,
             .sync-btn:focus, .sync-btn:active,
@@ -1826,6 +1913,20 @@ async def dashboard() -> HTMLResponse:
             .file-item:focus, .file-item:active {{
                 outline: none !important;
                 box-shadow: none !important;
+            }}
+            
+            /* Make ALL buttons ultra-responsive */
+            button, .btn, .sync-btn, .download-btn {{
+                cursor: pointer;
+                touch-action: manipulation;  /* Prevent zoom delay on mobile */
+                user-select: none;
+                -webkit-user-select: none;
+                transition: all 0.1s ease-out !important;  /* INSTANT response */
+            }}
+            
+            button:active, .btn:active, .sync-btn:active, .download-btn:active {{
+                transform: scale(0.97) !important;  /* INSTANT visual feedback */
+                transition: transform 0.05s ease-out !important;
             }}
             
             :root {{
@@ -2192,13 +2293,16 @@ async def dashboard() -> HTMLResponse:
                 cursor: pointer;
                 font-weight: 700;
                 font-size: 0.9rem;
-                transition: all 0.3s;
+                transition: all 0.1s ease-out;  /* ULTRA FAST response */
                 display: flex;
                 align-items: center;
                 gap: 0.75rem;
                 position: relative;
                 overflow: hidden;
                 user-select: none;
+                -webkit-tap-highlight-color: transparent;  /* Remove mobile tap delay */
+                touch-action: manipulation;  /* Prevent zoom on double-tap */
+                will-change: transform, box-shadow;  /* GPU acceleration */
             }}
             
             .sync-btn::before {{
@@ -2211,7 +2315,7 @@ async def dashboard() -> HTMLResponse:
                 height: 0;
                 border-radius: 50%;
                 background: rgba(255, 255, 255, 0.3);
-                transition: width 0.6s, height 0.6s;
+                transition: width 0.3s ease-out, height 0.3s ease-out;  /* Faster ripple */
             }}
             
             .sync-btn:hover::before {{
@@ -2220,17 +2324,19 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .sync-btn:hover {{
-                transform: translateY(-2px);
+                transform: translateY(-2px) scale(1.02);  /* More noticeable feedback */
                 box-shadow: 0 10px 40px var(--accent-glow);
             }}
             
             .sync-btn:active {{
-                transform: translateY(0);
+                transform: translateY(0) scale(0.98);  /* INSTANT press feedback */
+                transition: all 0.05s ease-out;  /* INSTANT response on click */
             }}
             
             .sync-btn:disabled {{
                 opacity: 0.5;
                 cursor: not-allowed;
+                transform: none !important;
             }}
             
             .info-badge {{
@@ -2427,18 +2533,25 @@ async def dashboard() -> HTMLResponse:
                 cursor: pointer;
                 font-weight: 700;
                 font-size: 0.85rem;
-                transition: all 0.3s;
+                transition: all 0.1s ease-out;  /* ULTRA FAST */
                 text-decoration: none;
                 display: flex;
                 align-items: center;
                 gap: 0.5rem;
                 user-select: none;
                 white-space: nowrap;
+                touch-action: manipulation;  /* No mobile tap delay */
+                will-change: transform, box-shadow;  /* GPU acceleration */
             }}
             
             .download-btn:hover {{
-                transform: translateY(-2px);
+                transform: translateY(-2px) scale(1.02);
                 box-shadow: 0 8px 25px var(--accent-glow);
+            }}
+            
+            .download-btn:active {{
+                transform: translateY(0) scale(0.98);  /* INSTANT press feedback */
+                transition: all 0.05s ease-out;
             }}
             
             /* AI Summary Button */
@@ -2451,25 +2564,32 @@ async def dashboard() -> HTMLResponse:
                 cursor: pointer;
                 font-weight: 700;
                 font-size: 0.85rem;
-                transition: all 0.3s;
+                transition: all 0.1s ease-out;  /* ULTRA FAST */
                 display: flex;
                 align-items: center;
                 gap: 0.5rem;
                 user-select: none;
                 white-space: nowrap;
                 box-shadow: 0 4px 12px rgba(220, 20, 60, 0.3);
+                touch-action: manipulation;
+                will-change: transform, box-shadow;
             }}
             
             .summary-btn:hover {{
-                transform: translateY(-2px);
+                transform: translateY(-2px) scale(1.02);
                 box-shadow: 0 8px 25px rgba(220, 20, 60, 0.5);
                 background: linear-gradient(135deg, #ff1744 0%, #ff4757 100%);
+            }}
+            
+            .summary-btn:active {{
+                transform: translateY(0) scale(0.98);  /* INSTANT feedback */
+                transition: all 0.05s ease-out;
             }}
             
             .summary-btn:disabled {{
                 opacity: 0.6;
                 cursor: not-allowed;
-                transform: none;
+                transform: none !important;
             }}
             
             /* Summarize All Button */
