@@ -4801,11 +4801,20 @@ async def dashboard() -> HTMLResponse:
                 e.preventDefault();
                 deferredPrompt = e;
                 
-                // Show custom install button
+                // Check if device is mobile - don't show button on mobile
+                var isMobile = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                
+                if (isMobile) {{
+                    console.log('📱 Mobile device detected - install button hidden (use browser menu)');
+                    return; // Don't show install button on mobile
+                }}
+                
+                // Show custom install button (desktop only)
                 const installBtn = document.getElementById('pwaInstallBtn');
                 if (installBtn) {{
                     installBtn.style.display = 'flex';
                     installBtn.classList.add('pulse');
+                    console.log('💻 Desktop detected - showing install button');
                     
                     // Remove any existing listeners
                     const newInstallBtn = installBtn.cloneNode(true);
