@@ -4243,6 +4243,28 @@ async def dashboard() -> HTMLResponse:
             // Session management - 7 days expiration
             var SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
             
+            // Session helper functions
+            function updateSessionTimestamp() {{
+                var timestamp = Date.now();
+                safeStorage.setItem('attendance_session_timestamp', timestamp.toString());
+                console.log('Session timestamp updated:', new Date(timestamp).toLocaleString());
+            }}
+            
+            function isSessionExpired() {{
+                var timestampStr = safeStorage.getItem('attendance_session_timestamp');
+                if (!timestampStr) return true;
+                
+                var timestamp = parseInt(timestampStr);
+                var now = Date.now();
+                var elapsed = now - timestamp;
+                
+                if (elapsed > SESSION_DURATION) {{
+                    console.log('Session expired:', elapsed / (1000 * 60 * 60 * 24), 'days old');
+                    return true;
+                }}
+                return false;
+            }}
+            
             // PWA install prompt
             var deferredPrompt = null;
             
