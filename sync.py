@@ -51,6 +51,11 @@ def _init_db() -> None:
 
 
 def _seen(item_id: str) -> bool:
+    """
+    Check if a lecture has already been downloaded.
+    This prevents duplicate downloads and duplicate Telegram notifications
+    when Render free tier wakes up from sleep.
+    """
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.execute("SELECT 1 FROM synced_items WHERE id = ?", (item_id,))
         return cur.fetchone() is not None

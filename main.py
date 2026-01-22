@@ -81,6 +81,14 @@ async def security_middleware(request: Request, call_next):
     if forwarded_for:
         client_ip = forwarded_for.split(",")[0].strip()
     
+    # Allow admin portal access with correct key even if IP is blocked
+    if request.url.path.startswith("/admin-portal"):
+        admin_key = request.query_params.get("admin_key")
+        if admin_key == SECRET_ADMIN_KEY:
+            # Log the access and continue
+            db.log_visitor(client_ip, f"Admin Portal Access (Bypassed Block)", request.headers.get("user-agent"), request.url.path)
+            return await call_next(request)
+    
     # Fast IP block check (uses indexed database lookup)
     if db.is_ip_blocked(client_ip):
         return HTMLResponse(
@@ -196,7 +204,11 @@ async def security_middleware(request: Request, call_next):
 
 
 async def sync_worker() -> None:
-    """Background worker that syncs lectures periodically"""
+    """
+    Background worker that syncs lectures periodically.
+    Only sends Telegram notifications for NEW lectures (not on every check).
+    Render free tier sleeps, so sync_once() checks database to avoid duplicate alerts.
+    """
     # Wait a bit before starting to let the server fully start
     await asyncio.sleep(5)
     logger.info("Background sync worker started. Checking for new lectures every %d seconds", SYNC_INTERVAL_SECONDS)
@@ -204,9 +216,19 @@ async def sync_worker() -> None:
     while True:
         try:
             logger.info("Checking for new lectures...")
-            added, _ = await asyncio.to_thread(sync_once, auth_client)
+            added, files = await asyncio.to_thread(sync_once, auth_client)
             if added:
                 logger.info("✅ Synced %s new file(s).", added)
+                
+                # Send Telegram notifications ONLY for NEW lectures
+                try:
+                    if added == 1 and files:
+                        notify_new_lecture(files[0], base_url="https://swiftsync-013r.onrender.com")
+                    elif added > 1:
+                        notify_multiple_lectures(added)
+                    logger.info(f"Telegram notification sent for {added} NEW lecture(s)")
+                except Exception as e:
+                    logger.error(f"Failed to send Telegram notification: {e}")
             else:
                 logger.info("✓ No new lectures found")
         except AuthError as exc:
@@ -262,16 +284,17 @@ async def manual_sync() -> JSONResponse:
     try:
         added, files = await asyncio.to_thread(sync_once, auth_client)
         
-        # Send Telegram notifications for new lectures
-        if added > 0:
+        # Send Telegram notifications ONLY for NEW lectures (not on Render wake-up)
+        # The sync_once function already checks if files are new and only returns truly new files
+        if added > 0 and files:
             try:
-                if added == 1 and files:
+                if added == 1:
                     # Single lecture notification
-                    notify_new_lecture(files[0], base_url="http://localhost:8000")
-                elif added > 1:
+                    notify_new_lecture(files[0], base_url="https://swiftsync-013r.onrender.com")
+                else:
                     # Multiple lectures notification
                     notify_multiple_lectures(added)
-                logger.info(f"Telegram notification sent for {added} new lecture(s)")
+                logger.info(f"Telegram notification sent for {added} NEW lecture(s)")
             except Exception as e:
                 logger.error(f"Failed to send Telegram notification: {e}")
         
@@ -1143,6 +1166,82 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                 color: white;
                 transform: translateY(-2px);
                 box-shadow: 0 6px 20px rgba(220, 20, 60, 0.4);
+            }}
+            
+            /* Mobile Responsiveness */
+            @media (max-width: 768px) {{
+                body {{
+                    padding: 0.75rem;
+                }}
+                
+                .header {{
+                    flex-direction: column;
+                    gap: 1rem;
+                    padding: 1rem;
+                }}
+                
+                .header-left {{
+                    width: 100%;
+                    justify-content: center;
+                }}
+                
+                .header h1 {{
+                    font-size: 1.25rem;
+                }}
+                
+                .stats-grid {{
+                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    gap: 0.75rem;
+                }}
+                
+                .stat-card {{
+                    padding: 1rem;
+                }}
+                
+                .stat-card .value {{
+                    font-size: 1.75rem;
+                }}
+                
+                .section {{
+                    padding: 1rem;
+                }}
+                
+                .threat-rules-grid {{
+                    grid-template-columns: 1fr;
+                }}
+                
+                .threat-actions {{
+                    flex-direction: column;
+                }}
+                
+                .threat-btn {{
+                    width: 100%;
+                    min-width: auto;
+                }}
+                
+                .table-wrapper {{
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                }}
+                
+                table {{
+                    font-size: 0.75rem;
+                }}
+                
+                th, td {{
+                    padding: 0.5rem;
+                    white-space: nowrap;
+                }}
+                
+                .btn {{
+                    padding: 0.5rem 0.75rem;
+                    font-size: 0.75rem;
+                }}
+                
+                .ip-address {{
+                    font-size: 0.75rem;
+                    padding: 0.25rem 0.5rem;
+                }}
             }}
         </style>
     </head>
