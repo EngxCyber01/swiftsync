@@ -1912,7 +1912,7 @@ async def dashboard() -> HTMLResponse:
         <title>SwiftSync • 2025/2026</title>
         
         <!-- PWA Meta Tags -->
-        <meta name="description" content="Student lecture management and synchronization system with Google Classroom integration">
+        <meta name="description" content="Student lecture management and synchronization system by SSCreative">
         <meta name="theme-color" content="#00d9ff">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1932,6 +1932,9 @@ async def dashboard() -> HTMLResponse:
         <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" as="style">
         <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" as="style">
         
+        <!-- Preload critical resources for instant display -->
+        <link rel="preload" href="/static/icons/icon-192.png" as="image">
+        
         <!-- Load CSS -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
@@ -1940,7 +1943,7 @@ async def dashboard() -> HTMLResponse:
                PERFORMANCE OPTIMIZATIONS
                ======================================== */
             
-            /* Splash Screen for PWA */
+            /* Splash Screen for PWA - Optimized for instant display */
             #splash-screen {{
                 position: fixed;
                 top: 0;
@@ -1953,7 +1956,8 @@ async def dashboard() -> HTMLResponse:
                 align-items: center;
                 justify-content: center;
                 z-index: 99999;
-                animation: fadeOut 0.5s ease 1.5s forwards;
+                opacity: 1;
+                transition: opacity 0.3s ease;
             }}
             
             #splash-screen.hidden {{
@@ -1964,8 +1968,11 @@ async def dashboard() -> HTMLResponse:
                 width: 120px;
                 height: 120px;
                 border-radius: 30px;
-                animation: pulse 1.5s ease-in-out infinite;
+                animation: pulse 1.2s ease-in-out infinite;
                 box-shadow: 0 8px 32px rgba(0, 217, 255, 0.3);
+                will-change: transform;
+                image-rendering: -webkit-optimize-contrast;
+                image-rendering: crisp-edges;
             }}
             
             .splash-text {{
@@ -2298,7 +2305,7 @@ async def dashboard() -> HTMLResponse:
                 align-items: center;
             }}
             
-            /* Kurdish Text Animation (in navbar) */
+            /* Kurdish Text Animation (in navbar) - Fixed size to prevent layout shift */
             .kurdish-text {{
                 font-size: 1.1rem;
                 font-weight: 500;
@@ -2309,9 +2316,12 @@ async def dashboard() -> HTMLResponse:
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
-                min-width: 300px;
+                width: 380px;
+                min-height: 26px;
                 text-align: center;
-                will-change: contents;
+                display: inline-block;
+                white-space: nowrap;
+                overflow: hidden;
             }}
             
             @keyframes cursorBlink {{
@@ -3537,7 +3547,7 @@ async def dashboard() -> HTMLResponse:
                 .install-btn {{
                     display: none !important;
                 }}
-                .kurdish-text {{ font-size: 0.9rem; min-width: 250px; }}
+                .kurdish-text {{ font-size: 0.9rem; width: 280px; min-height: 22px; }}
                 .stats {{ grid-template-columns: 1fr; }}
                 .toolbar {{ flex-direction: column; align-items: stretch; }}
                 .search-box {{ min-width: 100%; }}
@@ -3792,9 +3802,9 @@ async def dashboard() -> HTMLResponse:
                 }}
             }}
             
-            // Start animation on page load
-            window.addEventListener('load', () => {{
-                setTimeout(typeWriter, 500);
+            // Start animation immediately for smoother UX
+            document.addEventListener('DOMContentLoaded', () => {{
+                setTimeout(typeWriter, 100); // Start almost immediately
             }});
             
             // Disable right-click for professional web app feel
@@ -4778,13 +4788,22 @@ async def dashboard() -> HTMLResponse:
             document.addEventListener('DOMContentLoaded', () => {{
                 console.log('🚀 Initializing mobile optimizations...');
                 
-                // Hide splash screen after page is fully loaded
-                setTimeout(() => {{
+                // Hide splash screen smoothly after content loads
+                const hideSplash = () => {{
                     const splashScreen = document.getElementById('splash-screen');
                     if (splashScreen) {{
-                        splashScreen.classList.add('hidden');
+                        splashScreen.style.opacity = '0';
+                        setTimeout(() => {{
+                            splashScreen.style.display = 'none';
+                        }}, 300);
                     }}
-                }}, 1500); // Show splash for 1.5 seconds
+                }};
+                
+                // Hide after minimum display time AND page ready
+                Promise.all([
+                    new Promise(resolve => setTimeout(resolve, 800)), // Minimum 800ms
+                    document.fonts.ready // Wait for fonts
+                ]).then(hideSplash);
                 
                 // Fix iOS tap delay (300ms)
                 document.addEventListener('touchstart', function() {{}}, true);
