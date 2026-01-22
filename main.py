@@ -182,77 +182,13 @@ async def security_middleware(request: Request, call_next):
             threat_type = "HEADER_INJECTION_ATTEMPT"
             threat_details = "Suspicious patterns in HTTP headers"
         
-        # Auto-block if threat detected
+        # Auto-block if threat detected (DISABLED FOR NOW - ONLY LOG)
         if threat_detected:
-            db.block_ip(client_ip, reason=f"{threat_type}: {threat_details}")
+            # Log the threat but DON'T auto-block yet (too aggressive for production)
             db.log_threat_detection(client_ip, threat_type, threat_details)
-            logger.warning(f"🚨 THREAT DETECTED & BLOCKED: {client_ip} - {threat_type}")
-            
-            return HTMLResponse(
-                content=f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Security Alert</title>
-                    <style>
-                        body {{
-                            background: linear-gradient(135deg, #1a1a2e 0%, #0f172a 100%);
-                            font-family: 'Inter', Arial, sans-serif;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            height: 100vh;
-                            margin: 0;
-                            color: white;
-                        }}
-                        .alert-box {{
-                            background: rgba(239, 68, 68, 0.1);
-                            border: 2px solid #ef4444;
-                            padding: 3rem;
-                            border-radius: 20px;
-                            text-align: center;
-                            backdrop-filter: blur(10px);
-                            max-width: 500px;
-                        }}
-                        .alert-icon {{
-                            font-size: 4rem;
-                            margin-bottom: 1rem;
-                        }}
-                        h1 {{ 
-                            font-size: 2rem; 
-                            margin: 0 0 1rem 0; 
-                            color: #ef4444;
-                        }}
-                        p {{ 
-                            font-size: 1rem; 
-                            opacity: 0.9; 
-                            margin: 0.5rem 0;
-                        }}
-                        .threat-code {{
-                            background: rgba(0, 0, 0, 0.3);
-                            padding: 0.5rem 1rem;
-                            border-radius: 8px;
-                            font-family: monospace;
-                            margin-top: 1rem;
-                            color: #fbbf24;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="alert-box">
-                        <div class="alert-icon">🚨</div>
-                        <h1>Security Threat Detected</h1>
-                        <p>Your IP has been automatically blocked by our Security Operations Center.</p>
-                        <p class="threat-code">Threat Type: {threat_type}</p>
-                        <p style="margin-top: 1.5rem; font-size: 0.9rem;">
-                            If this is a mistake, please contact the system administrator.
-                        </p>
-                    </div>
-                </body>
-                </html>
-                """,
-                status_code=403
-            )
+            logger.warning(f"⚠️ THREAT DETECTED (Not Blocked): {client_ip} - {threat_type}")
+            # Note: Admin can manually block IPs from the SOC dashboard
+            # Continue processing request normally (don't block)
     
     # Continue processing request
     response = await call_next(request)
@@ -1663,22 +1599,23 @@ async def unblock_ip_endpoint(admin_key: str, ip: str) -> JSONResponse:
 
 @app.post("/admin-portal/clear-activity")
 async def clear_activity_endpoint(admin_key: str) -> JSONResponse:
-    """Clear all activity logs and request logs"""
+    """Clear all activity logs and unblock ALL IPs"""
     if admin_key != SECRET_ADMIN_KEY:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     try:
-        # Clear activity and requests from database
+        # Clear activity and unblock ALL IPs from database
         from database import DB_PATH
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM visitor_logs")
-        cursor.execute("DELETE FROM blacklist")
+        cursor.execute("DELETE FROM blacklist")  # This unblocks all IPs
+        cursor.execute("DELETE FROM threat_logs")  # Clear threat logs too
         conn.commit()
         conn.close()
         
-        logger.warning("Admin cleared all activity logs and blacklist")
-        return JSONResponse({"success": True, "message": "Activity logs cleared successfully"})
+        logger.warning("Admin cleared all activity logs, threat logs, and unblocked all IPs")
+        return JSONResponse({"success": True, "message": "All IPs unblocked and logs cleared successfully"})
     except Exception as e:
         logger.exception(f"Error clearing activity: {e}")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
