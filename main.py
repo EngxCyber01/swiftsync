@@ -1853,7 +1853,7 @@ async def dashboard() -> HTMLResponse:
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
         <title>SwiftSync • 2025/2026</title>
         
         <!-- PWA Meta Tags -->
@@ -1862,6 +1862,7 @@ async def dashboard() -> HTMLResponse:
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         <meta name="apple-mobile-web-app-title" content="SwiftSync">
+        <meta name="mobile-web-app-capable" content="yes">
         <link rel="manifest" href="/manifest.json">
         <link rel="apple-touch-icon" href="/static/icons/icon-192x192.png">
         
@@ -2092,26 +2093,82 @@ async def dashboard() -> HTMLResponse:
             /* PWA Install Button */
             .install-btn {{
                 display: none;
-                padding: 0.5rem 1rem;
-                background: rgba(0, 217, 255, 0.15);
+                align-items: center;
+                justify-content: center;
+                padding: 0.6rem 1.2rem;
+                background: linear-gradient(135deg, rgba(0, 217, 255, 0.15), rgba(0, 150, 255, 0.15));
                 color: #00d9ff;
-                border: 1px solid rgba(0, 217, 255, 0.3);
-                border-radius: 8px;
-                font-size: 0.875rem;
+                border: 2px solid rgba(0, 217, 255, 0.4);
+                border-radius: 10px;
+                font-size: 0.9rem;
                 font-weight: 600;
                 cursor: pointer;
                 transition: all 0.2s ease;
                 white-space: nowrap;
+                -webkit-tap-highlight-color: transparent;
+                user-select: none;
+                position: relative;
+                overflow: hidden;
+            }}
+            
+            .install-btn::before {{
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                width: 0;
+                height: 0;
+                background: rgba(0, 217, 255, 0.3);
+                border-radius: 50%;
+                transform: translate(-50%, -50%);
+                transition: width 0.4s ease, height 0.4s ease;
+            }}
+            
+            .install-btn:hover::before,
+            .install-btn:active::before {{
+                width: 300px;
+                height: 300px;
             }}
             
             .install-btn:hover {{
-                background: rgba(0, 217, 255, 0.25);
-                border-color: rgba(0, 217, 255, 0.5);
-                transform: translateY(-1px);
+                background: linear-gradient(135deg, rgba(0, 217, 255, 0.3), rgba(0, 150, 255, 0.3));
+                border-color: rgba(0, 217, 255, 0.6);
+                transform: translateY(-2px) scale(1.02);
+                box-shadow: 0 5px 20px rgba(0, 217, 255, 0.3);
+            }}
+            
+            .install-btn:active {{
+                transform: translateY(0) scale(0.98);
+            }}
+            
+            .install-btn.pulse {{
+                animation: pulse-install 2s ease-in-out infinite;
+            }}
+            
+            @keyframes pulse-install {{
+                0%, 100% {{
+                    box-shadow: 0 0 0 0 rgba(0, 217, 255, 0.7);
+                }}
+                50% {{
+                    box-shadow: 0 0 0 10px rgba(0, 217, 255, 0);
+                }}
             }}
             
             .install-btn i {{
                 margin-right: 0.5rem;
+                position: relative;
+                z-index: 1;
+            }}
+            
+            .install-btn span {{
+                position: relative;
+                z-index: 1;
+            }}
+            
+            .install-btn:disabled {{
+                opacity: 0.6;
+                cursor: not-allowed;
+                transform: none;
             }}
             
             .nav-actions {{
@@ -3399,7 +3456,8 @@ async def dashboard() -> HTMLResponse:
                 <div class="nav-actions">
                     <!-- PWA Install Button -->
                     <button class="install-btn" id="pwaInstallBtn">
-                        <i class="fas fa-download"></i> Install App
+                        <i class="fas fa-download"></i>
+                        <span>Install App</span>
                     </button>
                     
                     <div class="year-badge">
@@ -4032,6 +4090,18 @@ async def dashboard() -> HTMLResponse:
             }}
             
             // ===================================
+            // GLOBAL VARIABLES - MUST BE DECLARED FIRST
+            // ===================================
+            
+            // Attendance variables
+            let attendanceSessionToken = localStorage.getItem('attendance_session_token') || null;
+            let attendanceUsername = localStorage.getItem('attendance_username') || null;
+            let attendanceRefreshInterval = null;
+            
+            // PWA install prompt
+            let deferredPrompt = null;
+            
+            // ===================================
             // ZONE SWITCHING
             // ===================================
             
@@ -4055,10 +4125,6 @@ async def dashboard() -> HTMLResponse:
             // ===================================
             // ATTENDANCE FUNCTIONS
             // ===================================
-            
-            let attendanceSessionToken = localStorage.getItem('attendance_session_token');
-            let attendanceUsername = localStorage.getItem('attendance_username');
-            let attendanceRefreshInterval = null; // For auto-refresh
             
             function checkAttendanceSession() {{
                 // Check for saved credentials (encrypted in base64)
@@ -4463,6 +4529,54 @@ async def dashboard() -> HTMLResponse:
             }}
         </script>
         
+        <!-- Mobile Touch Optimization -->
+        <script>
+            // Add touch event support for all interactive elements on mobile
+            document.addEventListener('DOMContentLoaded', () => {{
+                console.log('🚀 Initializing mobile optimizations...');
+                
+                // Fix iOS tap delay (300ms)
+                document.addEventListener('touchstart', function() {{}}, true);
+                
+                // Enhance all buttons with touch feedback
+                const buttons = document.querySelectorAll('button, .btn, .action-btn, .sync-btn, .admin-btn');
+                buttons.forEach(btn => {{
+                    // Add active state on touch
+                    btn.addEventListener('touchstart', function() {{
+                        this.style.transform = 'scale(0.95)';
+                    }}, {{ passive: true }});
+                    
+                    btn.addEventListener('touchend', function() {{
+                        this.style.transform = '';
+                    }}, {{ passive: true }});
+                    
+                    btn.addEventListener('touchcancel', function() {{
+                        this.style.transform = '';
+                    }}, {{ passive: true }});
+                }});
+                
+                // Prevent double-tap zoom on buttons
+                let lastTouchEnd = 0;
+                document.addEventListener('touchend', function(event) {{
+                    const now = Date.now();
+                    if (now - lastTouchEnd <= 300) {{
+                        event.preventDefault();
+                    }}
+                    lastTouchEnd = now;
+                }}, false);
+                
+                // Log initialization complete
+                console.log('✅ Mobile optimizations active');
+                console.log('📱 Device:', navigator.userAgent.includes('Mobile') ? 'Mobile' : 'Desktop');
+                console.log('🔐 Attendance Token:', attendanceSessionToken ? 'Present' : 'None');
+                
+                // Auto-check for saved attendance session
+                if (attendanceSessionToken) {{
+                    console.log('🔄 Found saved attendance session, verifying...');
+                }}
+            }});
+        </script>
+        
         <!-- PWA Service Worker Registration -->
         <script>
             if ('serviceWorker' in navigator) {{
@@ -4478,25 +4592,65 @@ async def dashboard() -> HTMLResponse:
             }}
             
             // PWA Install Prompt Handler
-            let deferredPrompt;
             window.addEventListener('beforeinstallprompt', (e) => {{
                 console.log('💡 PWA install prompt available');
                 e.preventDefault();
                 deferredPrompt = e;
                 
-                // Show custom install button if exists
+                // Show custom install button
                 const installBtn = document.getElementById('pwaInstallBtn');
                 if (installBtn) {{
-                    installBtn.style.display = 'block';
-                    installBtn.onclick = async () => {{
-                        if (deferredPrompt) {{
+                    installBtn.style.display = 'flex';
+                    installBtn.classList.add('pulse');
+                    
+                    // Remove any existing listeners
+                    const newInstallBtn = installBtn.cloneNode(true);
+                    installBtn.parentNode.replaceChild(newInstallBtn, installBtn);
+                    
+                    // Add click handler for desktop/mobile
+                    newInstallBtn.addEventListener('click', async (evt) => {{
+                        evt.preventDefault();
+                        evt.stopPropagation();
+                        
+                        if (!deferredPrompt) {{
+                            alert('App is already installed or install prompt is not available!');
+                            return;
+                        }}
+                        
+                        console.log('👆 Install button clicked');
+                        newInstallBtn.disabled = true;
+                        newInstallBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Installing...';
+                        
+                        try {{
                             deferredPrompt.prompt();
                             const {{ outcome }} = await deferredPrompt.userChoice;
                             console.log(`User response: ${{outcome}}`);
+                            
+                            if (outcome === 'accepted') {{
+                                console.log('✅ User accepted installation');
+                                newInstallBtn.innerHTML = '<i class="fas fa-check"></i> Installed!';
+                            }} else {{
+                                console.log('❌ User dismissed installation');
+                                newInstallBtn.innerHTML = '<i class="fas fa-download"></i> Install App';
+                                newInstallBtn.disabled = false;
+                            }}
+                            
                             deferredPrompt = null;
-                            installBtn.style.display = 'none';
+                            setTimeout(() => {{
+                                newInstallBtn.style.display = 'none';
+                            }}, 2000);
+                        }} catch (error) {{
+                            console.error('Install error:', error);
+                            newInstallBtn.innerHTML = '<i class="fas fa-download"></i> Install App';
+                            newInstallBtn.disabled = false;
                         }}
-                    }};
+                    }});
+                    
+                    // Add touch handler for better mobile support
+                    newInstallBtn.addEventListener('touchend', async (evt) => {{
+                        evt.preventDefault();
+                        newInstallBtn.click();
+                    }});
                 }}
             }});
             
@@ -4504,6 +4658,10 @@ async def dashboard() -> HTMLResponse:
             window.addEventListener('appinstalled', () => {{
                 console.log('✅ PWA installed successfully!');
                 deferredPrompt = null;
+                const installBtn = document.getElementById('pwaInstallBtn');
+                if (installBtn) {{
+                    installBtn.style.display = 'none';
+                }}
             }});
         </script>
     </body>
