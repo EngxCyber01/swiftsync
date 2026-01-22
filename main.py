@@ -4139,30 +4139,16 @@ async def dashboard() -> HTMLResponse:
             // GLOBAL VARIABLES - MUST BE DECLARED FIRST
             // ===================================
             
-            // Attendance variables
-            let attendanceSessionToken = localStorage.getItem('attendance_session_token') || null;
-            let attendanceUsername = localStorage.getItem('attendance_username') || null;
-            let attendanceRefreshInterval = null;
+            // Attendance variables - Declare at global scope for mobile compatibility
+            var attendanceSessionToken = localStorage.getItem('attendance_session_token') || null;
+            var attendanceUsername = localStorage.getItem('attendance_username') || null;
+            var attendanceRefreshInterval = null;
             
             // Session management - 7 days expiration
-            const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-            
-            // Check if session is expired
-            function isSessionExpired() {{
-                const sessionTimestamp = localStorage.getItem('attendance_session_timestamp');
-                if (!sessionTimestamp) return true;
-                
-                const elapsed = Date.now() - parseInt(sessionTimestamp);
-                return elapsed > SESSION_DURATION;
-            }}
-            
-            // Update session timestamp
-            function updateSessionTimestamp() {{
-                localStorage.setItem('attendance_session_timestamp', Date.now().toString());
-            }}
+            var SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
             
             // PWA install prompt
-            let deferredPrompt = null;
+            var deferredPrompt = null;
             
             // ===================================
             // ZONE SWITCHING
@@ -4256,10 +4242,10 @@ async def dashboard() -> HTMLResponse:
             async function loginAttendance(event) {{
                 event.preventDefault();
                 
-                const username = document.getElementById('attendanceUsername').value.trim();
-                const password = document.getElementById('attendancePassword').value;
-                const rememberMe = document.getElementById('rememberMe').checked;
-                const submitBtn = document.getElementById('loginSubmitBtn');
+                var username = document.getElementById('attendanceUsername').value.trim();
+                var password = document.getElementById('attendancePassword').value;
+                var rememberMe = document.getElementById('rememberMe').checked;
+                var submitBtn = document.getElementById('loginSubmitBtn');
                 
                 if (!username || !password) {{
                     alert('Please enter both username and password');
@@ -4272,11 +4258,18 @@ async def dashboard() -> HTMLResponse:
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Authenticating...</span>';
                 
                 try {{
-                    const response = await fetch(`/api/attendance/login?username=${{encodeURIComponent(username)}}&password=${{encodeURIComponent(password)}}`, {{
-                        method: 'POST'
+                    var response = await fetch(`/api/attendance/login?username=${{encodeURIComponent(username)}}&password=${{encodeURIComponent(password)}}`, {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json'
+                        }}
                     }});
                     
-                    const result = await response.json();
+                    if (!response.ok) {{
+                        throw new Error(`HTTP error! status: ${{response.status}}`);
+                    }}
+                    
+                    var result = await response.json();
                     
                     if (result.success) {{
                         // Save session token
