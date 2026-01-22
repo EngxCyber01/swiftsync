@@ -4210,21 +4210,64 @@ async def dashboard() -> HTMLResponse:
             // ===================================
             
             // Safe localStorage wrapper to prevent access errors
+            // Uses cookies as fallback for mobile browsers that clear localStorage
             var safeStorage = {{
+                // Helper: Set cookie
+                _setCookie: function(name, value, days) {{
+                    var expires = "";
+                    if (days) {{
+                        var date = new Date();
+                        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                        expires = "; expires=" + date.toUTCString();
+                    }}
+                    document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=Lax";
+                }},
+                // Helper: Get cookie
+                _getCookie: function(name) {{
+                    var nameEQ = name + "=";
+                    var ca = document.cookie.split(';');
+                    for (var i = 0; i < ca.length; i++) {{
+                        var c = ca[i];
+                        while (c.charAt(0) == ' ') c = c.substring(1, c.length);
+                        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
+                    }}
+                    return null;
+                }},
+                // Helper: Delete cookie
+                _deleteCookie: function(name) {{
+                    document.cookie = name + '=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+                }},
+                
                 getItem: function(key) {{
                     try {{
-                        return localStorage.getItem(key);
+                        var value = localStorage.getItem(key);
+                        // If localStorage is empty, try cookie fallback
+                        if (!value) {{
+                            value = this._getCookie(key);
+                            // If found in cookie, restore to localStorage
+                            if (value) {{
+                                try {{
+                                    localStorage.setItem(key, value);
+                                }} catch (e) {{
+                                    // localStorage write failed, cookie will be used
+                                }}
+                            }}
+                        }}
+                        return value;
                     }} catch (e) {{
-                        console.warn('localStorage access denied:', e);
-                        return null;
+                        console.warn('localStorage access denied, using cookie:', e);
+                        return this._getCookie(key);
                     }}
                 }},
                 setItem: function(key, value) {{
                     try {{
                         localStorage.setItem(key, value);
+                        // Also save to cookie as backup (7 days)
+                        this._setCookie(key, value, 7);
                         return true;
                     }} catch (e) {{
-                        console.warn('localStorage write denied:', e);
+                        console.warn('localStorage write denied, using cookie:', e);
+                        this._setCookie(key, value, 7);
                         return false;
                     }}
                 }},
@@ -4234,6 +4277,8 @@ async def dashboard() -> HTMLResponse:
                     }} catch (e) {{
                         console.warn('localStorage remove denied:', e);
                     }}
+                    // Also remove cookie
+                    this._deleteCookie(key);
                 }}
             }};
             
@@ -4774,11 +4819,25 @@ async def dashboard() -> HTMLResponse:
                 // Log initialization complete
                 console.log('✅ Mobile optimizations active');
                 console.log('📱 Device:', navigator.userAgent.includes('Mobile') ? 'Mobile' : 'Desktop');
+                console.log('� User Agent:', navigator.userAgent);
                 console.log('🔐 Attendance Token:', attendanceSessionToken ? 'Present' : 'None');
+                console.log('👤 Attendance Username:', attendanceUsername ? attendanceUsername : 'None');
+                
+                // Debug localStorage on mobile
+                try {{
+                    var testKey = 'test_storage';
+                    safeStorage.setItem(testKey, 'test_value');
+                    var testRead = safeStorage.getItem(testKey);
+                    console.log('📦 localStorage test:', testRead === 'test_value' ? 'Working' : 'Failed');
+                    safeStorage.removeItem(testKey);
+                }} catch (e) {{
+                    console.error('❌ localStorage test failed:', e);
+                }}
                 
                 // Auto-restore attendance session on page load
                 if (attendanceSessionToken && !isSessionExpired()) {{
                     console.log('🔄 Found valid attendance session, auto-logging in...');
+                    console.log('⏰ Session timestamp:', safeStorage.getItem('attendance_session_timestamp'));
                     // Switch to attendance zone and load data
                     setTimeout(() => {{
                         switchZone('attendance');
@@ -4790,6 +4849,8 @@ async def dashboard() -> HTMLResponse:
                     safeStorage.removeItem('attendance_session_token');
                     safeStorage.removeItem('attendance_username');
                     safeStorage.removeItem('attendance_session_timestamp');
+                }} else {{
+                    console.log('ℹ️ No valid session found on page load');
                 }}
             }});
         </script>
