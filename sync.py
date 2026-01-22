@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -40,6 +41,7 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS synced_items (
                 id TEXT PRIMARY KEY,
                 downloaded_at TEXT DEFAULT (datetime('now')),
+                upload_date TEXT,
                 subject TEXT,
                 filename TEXT
             )
@@ -54,11 +56,11 @@ def _seen(item_id: str) -> bool:
         return cur.fetchone() is not None
 
 
-def _mark_seen(item_id: str, subject: str = None, filename: str = None) -> None:
+def _mark_seen(item_id: str, subject: str = None, filename: str = None, upload_date: str = None) -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO synced_items (id, subject, filename) VALUES (?, ?, ?)", 
-            (item_id, subject, filename)
+            "INSERT OR IGNORE INTO synced_items (id, subject, filename, upload_date) VALUES (?, ?, ?, ?)", 
+            (item_id, subject, filename, upload_date)
         )
         conn.commit()
 
@@ -222,7 +224,7 @@ def _resolve_filename(response: requests.Response, item_id: str) -> str:
     return f"material-{item_id}"
 
 
-def download_material(session: requests.Session, item_id: str) -> Path:
+def download_material(session: requests.Session, item_id: str) -> Tuple[Path, str]:
     params = {"id": item_id}
     response = session.get(DOWNLOAD_ENDPOINT, params=params, stream=True)
     
@@ -235,13 +237,27 @@ def download_material(session: requests.Session, item_id: str) -> Path:
 
     filename = _resolve_filename(response, item_id)
     target = DOWNLOAD_DIR / filename
+    
+    # Extract upload date from Last-Modified header
+    upload_date = response.headers.get("Last-Modified", "")
+    if not upload_date:
+        # Fallback to current date if server doesn't provide Last-Modified
+        upload_date = datetime.now().isoformat()
+    else:
+        # Convert from HTTP date format to ISO format for consistency
+        from email.utils import parsedate_to_datetime
+        try:
+            dt = parsedate_to_datetime(upload_date)
+            upload_date = dt.isoformat()
+        except Exception:
+            upload_date = datetime.now().isoformat()
 
     with open(target, "wb") as file:
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
                 file.write(chunk)
 
-    return target
+    return target, upload_date
 
 
 def sync_once(auth_client: AuthClient) -> Tuple[int, List[Path]]:
@@ -262,10 +278,10 @@ def sync_once(auth_client: AuthClient) -> Tuple[int, List[Path]]:
                     continue
                 try:
                     logger.info("Downloading material with ID: %s (Subject: %s)", item_id, subject)
-                    path = download_material(session, item_id)
-                    _mark_seen(item_id, subject, path.name)
+                    path, upload_date = download_material(session, item_id)
+                    _mark_seen(item_id, subject, path.name, upload_date)
                     new_files.append(path)
-                    logger.info("Successfully downloaded: %s", path.name)
+                    logger.info("Successfully downloaded: %s (Upload date: %s)", path.name, upload_date)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Failed to download id=%s: %s", item_id, exc)
     except Exception as e:
@@ -285,10 +301,10 @@ def sync_once(auth_client: AuthClient) -> Tuple[int, List[Path]]:
                 continue
             try:
                 logger.info("Downloading material with ID: %s", item_id)
-                path = download_material(session, item_id)
-                _mark_seen(item_id, None, path.name)
+                path, upload_date = download_material(session, item_id)
+                _mark_seen(item_id, None, path.name, upload_date)
                 new_files.append(path)
-                logger.info("Successfully downloaded: %s", path.name)
+                logger.info("Successfully downloaded: %s (Upload date: %s)", path.name, upload_date)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Failed to download id=%s: %s", item_id, exc)
 

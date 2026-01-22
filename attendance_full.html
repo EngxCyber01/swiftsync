@@ -1,0 +1,191 @@
+<div class="p-3">
+ <h6 class="col-12 with-border semibold my-3 pb-3 color-blue">
+  Student absences list
+ </h6>
+ <div class="table-responsive table-border-radius">
+  <table class="table table-bordered table-hover">
+   <thead>
+    <tr>
+     <th>
+      Module
+     </th>
+     <th>
+      Class
+     </th>
+     <th>
+      Semester
+     </th>
+     <th>
+      Absences Count
+     </th>
+     <th>
+     </th>
+    </tr>
+   </thead>
+   <tbody>
+    <tr>
+     <td>
+      Object Oriented Programming
+     </td>
+     <td>
+      Object Oriented Programming - Group B - Software_S25-26
+     </td>
+     <td>
+      Spring Semester
+     </td>
+     <td>
+      0
+     </td>
+     <td>
+      <button class="btn btn-primary-outline btn-sm btn-inline m-0" disabled="disabled" onclick="openStudentAbsenceDetails('0c01e678-400e-4609-adfe-3cecfe2c8050','37cb5761-1a46-4ab8-5c6d-08de4d1b3696')" title="Student Absence Details" type="button">
+       Student Absence Details
+      </button>
+     </td>
+    </tr>
+    <tr>
+     <td>
+      Database Design
+     </td>
+     <td>
+      Database Design - Group B - Software_S25-26
+     </td>
+     <td>
+      Spring Semester
+     </td>
+     <td>
+      0
+     </td>
+     <td>
+      <button class="btn btn-primary-outline btn-sm btn-inline m-0" disabled="disabled" onclick="openStudentAbsenceDetails('1c4e7f93-2d82-492e-8f49-4b0c8389c2fd','5ab954d1-3c05-412b-5c71-08de4d1b3696')" title="Student Absence Details" type="button">
+       Student Absence Details
+      </button>
+     </td>
+    </tr>
+    <tr>
+     <td>
+      Computer Organization
+     </td>
+     <td>
+      Computer Organization  - Software_S25-26_Retake
+     </td>
+     <td>
+      Spring Semester
+     </td>
+     <td>
+      0
+     </td>
+     <td>
+      <button class="btn btn-primary-outline btn-sm btn-inline m-0" disabled="disabled" onclick="openStudentAbsenceDetails('d2428989-8d03-4df0-9f3e-52bf9643cc92','32851afe-f716-4115-4b24-08de4c4f83ca')" title="Student Absence Details" type="button">
+       Student Absence Details
+      </button>
+     </td>
+    </tr>
+    <tr>
+     <td>
+      Software Design and Modelling with UML
+     </td>
+     <td>
+      Software Design and Modelling with UML - Group B - Software_S25-26
+     </td>
+     <td>
+      Spring Semester
+     </td>
+     <td>
+      0
+     </td>
+     <td>
+      <button class="btn btn-primary-outline btn-sm btn-inline m-0" disabled="disabled" onclick="openStudentAbsenceDetails('66e8bc4f-a5db-41e9-8fd3-850fd19210fa','bcc89831-e4b5-43a1-5c70-08de4d1b3696')" title="Student Absence Details" type="button">
+       Student Absence Details
+      </button>
+     </td>
+    </tr>
+    <tr>
+     <td>
+      Numerical Analysis and Probability
+     </td>
+     <td>
+      Numerical Analysis and Probability - Software_S_25-26
+     </td>
+     <td>
+      Spring Semester
+     </td>
+     <td>
+      0
+     </td>
+     <td>
+      <button class="btn btn-primary-outline btn-sm btn-inline m-0" disabled="disabled" onclick="openStudentAbsenceDetails('e20af6e2-9ee8-41f9-bf1a-ae10e83b2b35','a772de57-f0e1-4561-2801-08de4c7d32fd')" title="Student Absence Details" type="button">
+       Student Absence Details
+      </button>
+     </td>
+    </tr>
+    <tr>
+     <td>
+      Mathematics IV
+     </td>
+     <td>
+      Mathematics IV - Group B - Software_S25-26
+     </td>
+     <td>
+      Spring Semester
+     </td>
+     <td>
+      0
+     </td>
+     <td>
+      <button class="btn btn-primary-outline btn-sm btn-inline m-0" disabled="disabled" onclick="openStudentAbsenceDetails('3fc6dabe-ff7e-4c51-9600-d379b101802b','e9c283c2-4519-4c12-5c69-08de4d1b3696')" title="Student Absence Details" type="button">
+       Student Absence Details
+      </button>
+     </td>
+    </tr>
+    <tr>
+     <td>
+      Data Communication
+     </td>
+     <td>
+      Data Communication - Software_S_25-26
+     </td>
+     <td>
+      Spring Semester
+     </td>
+     <td>
+      0
+     </td>
+     <td>
+      <button class="btn btn-primary-outline btn-sm btn-inline m-0" disabled="disabled" onclick="openStudentAbsenceDetails('2bdc05b5-295e-483c-9664-f0bcdaaa7ff1','aaa0293b-dbee-4003-2800-08de4c7d32fd')" title="Student Absence Details" type="button">
+       Student Absence Details
+      </button>
+     </td>
+    </tr>
+    <tr>
+     <td>
+      Programming Principles
+     </td>
+     <td>
+      Programming Principles - Software_S25-26_Retake
+     </td>
+     <td>
+      Spring Semester
+     </td>
+     <td>
+      0
+     </td>
+     <td>
+      <button class="btn btn-primary-outline btn-sm btn-inline m-0" disabled="disabled" onclick="openStudentAbsenceDetails('77576c01-e997-4b70-a927-f86f9dbf9a01','8fc64f96-0ef6-4017-4b27-08de4c4f83ca')" title="Student Absence Details" type="button">
+       Student Absence Details
+      </button>
+     </td>
+    </tr>
+   </tbody>
+  </table>
+ </div>
+</div>
+<script>
+ function openStudentAbsenceDetails(classId,studentClassId) {
+         var processResourceFiles = false;
+         var showInsideAnotherModal = false;
+         var showModal = true;
+        Awro.ModalManager.LoadViewGetAsync('/University/ClassAttendance/GetStudentAbsenceDetails?studentClassId=' + studentClassId + "&classId=" + classId, 'Student Absence Details', processResourceFiles, 'modal-lg', showInsideAnotherModal, showModal, 'body', function (modalSelector) {
+                //Do somthing if you want
+         });
+    }
+</script>
