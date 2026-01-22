@@ -1348,6 +1348,13 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
         </style>
     </head>
     <body oncontextmenu="return false;">
+        <!-- Splash Screen -->
+        <div id="splash-screen">
+            <img src="/static/icons/icon-192.png" alt="SwiftSync" class="splash-logo">
+            <div class="splash-text">SwiftSync</div>
+            <div class="splash-subtitle">by SSCreative</div>
+        </div>
+        
         <script>
             // Disable right-click
             document.addEventListener('contextmenu', event => event.preventDefault());
@@ -1930,6 +1937,72 @@ async def dashboard() -> HTMLResponse:
             /* ========================================
                PERFORMANCE OPTIMIZATIONS
                ======================================== */
+            
+            /* Splash Screen for PWA */
+            #splash-screen {{
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100vh;
+                background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                z-index: 99999;
+                animation: fadeOut 0.5s ease 1.5s forwards;
+            }}
+            
+            #splash-screen.hidden {{
+                display: none;
+            }}
+            
+            .splash-logo {{
+                width: 120px;
+                height: 120px;
+                border-radius: 30px;
+                animation: pulse 1.5s ease-in-out infinite;
+                box-shadow: 0 8px 32px rgba(0, 217, 255, 0.3);
+            }}
+            
+            .splash-text {{
+                color: #00d9ff;
+                font-size: 2rem;
+                font-weight: 800;
+                margin-top: 1.5rem;
+                animation: fadeInUp 0.8s ease;
+            }}
+            
+            .splash-subtitle {{
+                color: rgba(255, 255, 255, 0.7);
+                font-size: 0.9rem;
+                margin-top: 0.5rem;
+                animation: fadeInUp 0.8s ease 0.2s both;
+            }}
+            
+            @keyframes pulse {{
+                0%, 100% {{ transform: scale(1); }}
+                50% {{ transform: scale(1.05); }}
+            }}
+            
+            @keyframes fadeInUp {{
+                from {{
+                    opacity: 0;
+                    transform: translateY(20px);
+                }}
+                to {{
+                    opacity: 1;
+                    transform: translateY(0);
+                }}
+            }}
+            
+            @keyframes fadeOut {{
+                to {{
+                    opacity: 0;
+                    visibility: hidden;
+                }}
+            }}
             
             * {{ 
                 margin: 0; 
@@ -3458,14 +3531,9 @@ async def dashboard() -> HTMLResponse:
             @media (max-width: 768px) {{
                 .container {{ padding: 1.5rem 1rem; }}
                 .nav {{ flex-direction: column; gap: 1rem; }}
+                /* Hide install button on mobile - use browser menu instead */
                 .install-btn {{
-                    width: 100%;
-                    display: flex !important;
-                    justify-content: center;
-                }}
-                .install-btn {{
-                    width: 100%;
-                    justify-content: center;
+                    display: none !important;
                 }}
                 .kurdish-text {{ font-size: 0.9rem; min-width: 250px; }}
                 .stats {{ grid-template-columns: 1fr; }}
@@ -4139,9 +4207,37 @@ async def dashboard() -> HTMLResponse:
             // GLOBAL VARIABLES - MUST BE DECLARED FIRST
             // ===================================
             
-            // Attendance variables - Declare at global scope for mobile compatibility
-            var attendanceSessionToken = localStorage.getItem('attendance_session_token') || null;
-            var attendanceUsername = localStorage.getItem('attendance_username') || null;
+            // Safe localStorage wrapper to prevent access errors
+            var safeStorage = {{
+                getItem: function(key) {{
+                    try {{
+                        return localStorage.getItem(key);
+                    }} catch (e) {{
+                        console.warn('localStorage access denied:', e);
+                        return null;
+                    }}
+                }},
+                setItem: function(key, value) {{
+                    try {{
+                        localStorage.setItem(key, value);
+                        return true;
+                    }} catch (e) {{
+                        console.warn('localStorage write denied:', e);
+                        return false;
+                    }}
+                }},
+                removeItem: function(key) {{
+                    try {{
+                        localStorage.removeItem(key);
+                    }} catch (e) {{
+                        console.warn('localStorage remove denied:', e);
+                    }}
+                }}
+            }};
+            
+            // Attendance variables - Use safe storage
+            var attendanceSessionToken = safeStorage.getItem('attendance_session_token') || null;
+            var attendanceUsername = safeStorage.getItem('attendance_username') || null;
             var attendanceRefreshInterval = null;
             
             // Session management - 7 days expiration
@@ -4181,12 +4277,12 @@ async def dashboard() -> HTMLResponse:
                     console.log('Session expired, clearing...');
                     // Clear expired session
                     attendanceSessionToken = null;
-                    localStorage.removeItem('attendance_session_token');
-                    localStorage.removeItem('attendance_session_timestamp');
+                    safeStorage.removeItem('attendance_session_token');
+                    safeStorage.removeItem('attendance_session_timestamp');
                 }}
                 
                 // Check for saved credentials (encrypted in base64)
-                const savedCreds = localStorage.getItem('attendance_credentials');
+                const savedCreds = safeStorage.getItem('attendance_credentials');
                 
                 if (savedCreds && !attendanceSessionToken) {{
                     // Auto-fill and auto-login
@@ -4275,8 +4371,8 @@ async def dashboard() -> HTMLResponse:
                         // Save session token
                         attendanceSessionToken = result.session_token;
                         attendanceUsername = result.username;
-                        localStorage.setItem('attendance_session_token', attendanceSessionToken);
-                        localStorage.setItem('attendance_username', attendanceUsername);
+                        safeStorage.setItem('attendance_session_token', attendanceSessionToken);
+                        safeStorage.setItem('attendance_username', attendanceUsername);
                         
                         // Set session timestamp (7 days expiration)
                         updateSessionTimestamp();
@@ -4284,9 +4380,9 @@ async def dashboard() -> HTMLResponse:
                         // Save credentials if remember me is checked (encrypted)
                         if (rememberMe) {{
                             const creds = btoa(JSON.stringify({{ u: username, p: password }}));
-                            localStorage.setItem('attendance_credentials', creds);
+                            safeStorage.setItem('attendance_credentials', creds);
                         }} else {{
-                            localStorage.removeItem('attendance_credentials');
+                            safeStorage.removeItem('attendance_credentials');
                         }}
                         
                         // Load attendance data
@@ -4589,10 +4685,10 @@ async def dashboard() -> HTMLResponse:
                 // Clear session and saved credentials
                 attendanceSessionToken = null;
                 attendanceUsername = null;
-                localStorage.removeItem('attendance_session_token');
-                localStorage.removeItem('attendance_username');
-                localStorage.removeItem('attendance_credentials');
-                localStorage.removeItem('attendance_session_timestamp');
+                safeStorage.removeItem('attendance_session_token');
+                safeStorage.removeItem('attendance_username');
+                safeStorage.removeItem('attendance_credentials');
+                safeStorage.removeItem('attendance_session_timestamp');
                 
                 // Reset form
                 document.getElementById('attendanceLoginForm').reset();
@@ -4612,6 +4708,14 @@ async def dashboard() -> HTMLResponse:
             // Add touch event support for all interactive elements on mobile
             document.addEventListener('DOMContentLoaded', () => {{
                 console.log('🚀 Initializing mobile optimizations...');
+                
+                // Hide splash screen after page is fully loaded
+                setTimeout(() => {{
+                    const splashScreen = document.getElementById('splash-screen');
+                    if (splashScreen) {{
+                        splashScreen.classList.add('hidden');
+                    }}
+                }}, 1500); // Show splash for 1.5 seconds
                 
                 // Fix iOS tap delay (300ms)
                 document.addEventListener('touchstart', function() {{}}, true);
