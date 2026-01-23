@@ -2266,8 +2266,8 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .logo-icon .sun {{
-                width: 24px;
-                height: 24px;
+                width: 16px;
+                height: 16px;
                 background: radial-gradient(circle at 30% 30%, 
                     #FFFACD 0%, 
                     #FFD700 30%, 
@@ -2280,9 +2280,9 @@ async def dashboard() -> HTMLResponse:
                 transform: translate(-50%, -50%);
                 animation: sunPulse 3s ease-in-out infinite;
                 box-shadow: 
-                    0 0 15px rgba(255, 215, 0, 1),
-                    0 0 30px rgba(255, 165, 0, 0.8),
-                    0 0 45px rgba(255, 140, 0, 0.6),
+                    0 0 10px rgba(255, 215, 0, 1),
+                    0 0 20px rgba(255, 165, 0, 0.8),
+                    0 0 30px rgba(255, 140, 0, 0.6),
                     inset -3px -3px 6px rgba(255, 140, 0, 0.4),
                     inset 2px 2px 4px rgba(255, 250, 205, 0.6);
                 z-index: 10;
@@ -2311,8 +2311,8 @@ async def dashboard() -> HTMLResponse:
                 position: absolute;
                 top: 50%;
                 left: 50%;
-                width: 40px;
-                height: 40px;
+                width: 32px;
+                height: 32px;
                 transform: translate(-50%, -50%);
                 background: 
                     repeating-conic-gradient(
@@ -2336,8 +2336,8 @@ async def dashboard() -> HTMLResponse:
                 position: absolute;
                 top: 50%;
                 left: 50%;
-                width: 30px;
-                height: 30px;
+                width: 22px;
+                height: 22px;
                 transform: translate(-50%, -50%);
                 background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, transparent 70%);
                 border-radius: 50%;
@@ -2900,6 +2900,36 @@ async def dashboard() -> HTMLResponse:
                 font-weight: 600;
                 color: var(--text-secondary);
                 white-space: nowrap;
+            }}
+            
+            .open-btn {{
+                padding: 0.75rem 1.5rem;
+                background: linear-gradient(135deg, #8b5cf6, #6366f1);
+                color: white;
+                border: none;
+                border-radius: 10px;
+                cursor: pointer !important;
+                font-weight: 700;
+                font-size: 0.85rem;
+                transition: all 0.15s ease-out;
+                text-decoration: none !important;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                user-select: none;
+                white-space: nowrap;
+                touch-action: manipulation;
+                -webkit-tap-highlight-color: transparent;
+            }}
+            
+            .open-btn:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 8px 20px rgba(139, 92, 246, 0.4);
+            }}
+            
+            .open-btn:active {{
+                transform: translateY(0) scale(0.98);
+                transition: all 0.05s ease-out;
             }}
             
             .download-btn {{
@@ -4359,22 +4389,16 @@ async def dashboard() -> HTMLResponse:
                                             </div>
                                         </div>
                                         <div class="file-size">${{formatBytes(file.size_bytes)}}</div>
-                                        ${{file.name.toLowerCase().endsWith('.pdf') ? `
-                                            <button class="summary-btn" onclick="summarizeLecture('${{file.name}}', event)">
-                                                <span>Get Summary</span>
-                                            </button>
-                                        ` : ''}}
-                                        <a href="${{file.url}}" class="download-btn" target="_blank" rel="noopener noreferrer">
+                                        <a href="${{file.url}}" class="open-btn" target="_blank" rel="noopener noreferrer">
+                                            <i class="fas fa-external-link-alt"></i>
+                                            <span>Open</span>
+                                        </a>
+                                        <a href="${{file.url}}" class="download-btn" download>
                                             <i class="fas fa-download"></i>
                                             <span>Download</span>
                                         </a>
                                     </div>
                                 `).join('')}}
-                                ${{files.some(f => f.name.toLowerCase().endsWith('.pdf')) ? `
-                                    <button class="summarize-all-btn" onclick="summarizeAllLectures('${{subject}}', event)">
-                                        <span>Summarize All Lectures</span>
-                                    </button>
-                                ` : ''}}
                             </div>
                         </div>
                     `;
