@@ -4603,6 +4603,12 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
+                    // OFFLINE CHECK: Don't attempt download if offline
+                    if (!navigator.onLine) {{
+                        showNotification('❌ No internet connection', 'error');
+                        return;
+                    }}
+                    
                     // Generate unique download URL with timestamp to prevent 'download again' dialog
                     const timestamp = new Date().getTime();
                     const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{timestamp}}`;
@@ -4627,15 +4633,18 @@ async def dashboard() -> HTMLResponse:
                     a.href = blobUrl;
                     a.download = filename;
                     document.body.appendChild(a);
+                    
+                    // MOBILE FIX: Only show notification after download actually starts
+                    // No premature notification - let the browser handle the download
                     a.click();
                     
-                    // Cleanup
+                    // Cleanup after reasonable time (no notification)
                     setTimeout(() => {{
                         document.body.removeChild(a);
                         URL.revokeObjectURL(blobUrl);
-                        showNotification('✅ Download finished!', 'success');
-                    }}, 100);
+                    }}, 2000);
                 }} catch (error) {{
+                    // Only show notification on actual errors
                     showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
                 }}
@@ -4644,16 +4653,33 @@ async def dashboard() -> HTMLResponse:
             // Load files on page load
             async function loadFiles() {{
                 try {{
+                    // OFFLINE CHECK: Show cached data or friendly message
+                    if (!navigator.onLine) {{
+                        console.log('📴 Offline - attempting to load cached data');
+                    }}
+                    
                     const response = await fetch('/api/files');
+                    
+                    // Handle offline or network errors gracefully
+                    if (!response.ok) {{
+                        throw new Error(`HTTP ${{response.status}}: ${{response.statusText}}`);
+                    }}
+                    
                     const data = await response.json();
                     renderFiles(data);
                 }} catch (error) {{
                     console.error('❌ Error loading files:', error);
+                    
+                    // Friendly offline message without panic
+                    const errorMsg = !navigator.onLine 
+                        ? 'You are offline. Connect to internet to load lectures.'
+                        : error.message;
+                    
                     document.getElementById('fileGrid').innerHTML = `
                         <div class="empty-state">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            <h3>Error Loading Files</h3>
-                            <p>${{error.message}}</p>
+                            <i class="fas fa-${{!navigator.onLine ? 'wifi-slash' : 'exclamation-triangle'}}"></i>
+                            <h3>${{!navigator.onLine ? 'No Internet Connection' : 'Error Loading Files'}}</h3>
+                            <p>${{errorMsg}}</p>
                             <button onclick="loadFiles()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer;">
                                 <i class="fas fa-sync"></i> Retry
                             </button>
