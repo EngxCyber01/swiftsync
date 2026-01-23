@@ -1446,13 +1446,6 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
         <div class="container">
             <div class="header">
                 <div class="header-left">
-                    <div class="logo-icon" style="width: 50px; height: 50px; border-radius: 12px; position: relative; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
-                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 33.33%; background: linear-gradient(180deg, #CE1126 0%, #DC143C 50%, #8B0000 100%);"></div>
-                        <div style="position: absolute; top: 33.33%; left: 0; right: 0; height: 33.33%; background: linear-gradient(135deg, #FFFFFF 0%, #FAFAFA 30%, #F8F8F8 60%, #F0F0F0 100%); display: flex; align-items: center; justify-content: center;">
-                            <div style="width: 14px; height: 14px; background: radial-gradient(circle at 30% 30%, #FFFACD 0%, #FFD700 30%, #FFA500 60%, #FF8C00 100%); border-radius: 50%; box-shadow: 0 0 8px rgba(255, 215, 0, 1), 0 0 16px rgba(255, 165, 0, 0.8);"></div>
-                        </div>
-                        <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 33.33%; background: linear-gradient(180deg, #006600 0%, #228B22 50%, #32CD32 100%);"></div>
-                    </div>
                     <div>
                         <h1>Admin <span style="color: #FFD700;">SOC</span></h1>
                         <div class="header-subtitle">Security Operations Center</div>
@@ -1959,7 +1952,7 @@ async def dashboard() -> HTMLResponse:
         <title>SwiftSync • 2025/2026</title>
         
         <!-- PWA Meta Tags -->
-        <meta name="description" content="Student lecture management and synchronization system by SSCreative">
+        <meta name="description" content="Student lecture management system by SSCreative">
         <meta name="theme-color" content="#00d9ff">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -4434,7 +4427,7 @@ async def dashboard() -> HTMLResponse:
                         <div class="empty-state" style="padding: 3rem;">
                             <i class="fas fa-cloud-download-alt" style="font-size: 4rem; color: var(--primary); margin-bottom: 1rem;"></i>
                             <h3 style="color: var(--text-primary); margin-bottom: 0.5rem;">No Lectures Yet</h3>
-                            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Click "Sync Now" to fetch your latest lectures from Google Classroom</p>
+                            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">Click "Sync Now" to fetch your latest lectures</p>
                             <button onclick="syncNow()" style="padding: 0.75rem 1.5rem; background: var(--primary); color: white; border: none; border-radius: 12px; cursor: pointer; font-size: 1rem; font-weight: 600; display: inline-flex; align-items: center; gap: 0.5rem; transition: all 0.2s;">
                                 <i class="fas fa-sync-alt"></i> Sync Now
                             </button>
@@ -4593,19 +4586,38 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Generate unique download URL with timestamp AND random string to bypass Android detection
+                    // Generate unique download URL with timestamp to prevent 'download again' dialog
                     const timestamp = new Date().getTime();
-                    const random = Math.random().toString(36).substring(2, 9);
-                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{timestamp}}${{random}}`;
+                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{timestamp}}`;
                     
-                    // Direct navigation - let server headers handle the download
-                    // This bypasses Android's duplicate detection since we're not using blob URLs
-                    window.location.href = downloadUrl;
+                    // Fetch with strict no-cache policy
+                    const response = await fetch(downloadUrl, {{
+                        cache: 'no-store',
+                        headers: {{
+                            'Cache-Control': 'no-cache, no-store, must-revalidate',
+                            'Pragma': 'no-cache'
+                        }}
+                    }});
                     
-                    // Show notification
+                    if (!response.ok) throw new Error('Download failed');
+                    
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    
+                    // Create hidden link and trigger download
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    // Cleanup
                     setTimeout(() => {{
-                        showNotification('✅ Download started!', 'success');
-                    }}, 500);
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(blobUrl);
+                        showNotification('✅ Download finished!', 'success');
+                    }}, 100);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
