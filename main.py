@@ -2266,8 +2266,8 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .logo-icon .sun {{
-                width: 16px;
-                height: 16px;
+                width: 24px;
+                height: 24px;
                 background: radial-gradient(circle at 30% 30%, 
                     #FFFACD 0%, 
                     #FFD700 30%, 
@@ -2280,9 +2280,9 @@ async def dashboard() -> HTMLResponse:
                 transform: translate(-50%, -50%);
                 animation: sunPulse 3s ease-in-out infinite;
                 box-shadow: 
-                    0 0 10px rgba(255, 215, 0, 1),
-                    0 0 20px rgba(255, 165, 0, 0.8),
-                    0 0 30px rgba(255, 140, 0, 0.6),
+                    0 0 15px rgba(255, 215, 0, 1),
+                    0 0 30px rgba(255, 165, 0, 0.8),
+                    0 0 45px rgba(255, 140, 0, 0.6),
                     inset -3px -3px 6px rgba(255, 140, 0, 0.4),
                     inset 2px 2px 4px rgba(255, 250, 205, 0.6);
                 z-index: 10;
@@ -2311,8 +2311,8 @@ async def dashboard() -> HTMLResponse:
                 position: absolute;
                 top: 50%;
                 left: 50%;
-                width: 32px;
-                height: 32px;
+                width: 40px;
+                height: 40px;
                 transform: translate(-50%, -50%);
                 background: 
                     repeating-conic-gradient(
@@ -2336,8 +2336,8 @@ async def dashboard() -> HTMLResponse:
                 position: absolute;
                 top: 50%;
                 left: 50%;
-                width: 22px;
-                height: 22px;
+                width: 30px;
+                height: 30px;
                 transform: translate(-50%, -50%);
                 background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, transparent 70%);
                 border-radius: 50%;
@@ -3766,56 +3766,6 @@ async def dashboard() -> HTMLResponse:
                 font-size: 1rem;
             }}
             
-            /* Toast Notifications */
-            .toast {{
-                position: fixed;
-                bottom: 2rem;
-                right: 2rem;
-                background: var(--bg-secondary);
-                border: 1px solid var(--border);
-                border-radius: 12px;
-                padding: 1rem 1.5rem;
-                display: flex;
-                align-items: center;
-                gap: 0.75rem;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-                backdrop-filter: blur(10px);
-                z-index: 10000;
-                opacity: 0;
-                transform: translateY(100px);
-                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-                max-width: 400px;
-            }}
-            
-            .toast.show {{
-                opacity: 1;
-                transform: translateY(0);
-            }}
-            
-            .toast-success {{
-                border-left: 4px solid var(--success);
-            }}
-            
-            .toast-success i {{
-                color: var(--success);
-                font-size: 1.2rem;
-            }}
-            
-            .toast-error {{
-                border-left: 4px solid #ef4444;
-            }}
-            
-            .toast-error i {{
-                color: #ef4444;
-                font-size: 1.2rem;
-            }}
-            
-            .toast span {{
-                color: var(--text-primary);
-                font-weight: 600;
-                font-size: 0.95rem;
-            }}
-            
             /* Responsive */
             @media (max-width: 768px) {{
                 .container {{ padding: 1.5rem 1rem; }}
@@ -4443,7 +4393,7 @@ async def dashboard() -> HTMLResponse:
                                             <i class="fas fa-external-link-alt"></i>
                                             <span>Open</span>
                                         </a>
-                                        <button class="download-btn" onclick="downloadFile('${{file.url}}', '${{file.name}}')">
+                                        <button class="download-btn" onclick="downloadFile('${{file.url}}', '${{file.name}}', event)">
                                             <i class="fas fa-download"></i>
                                             <span>Download</span>
                                         </button>
@@ -4510,42 +4460,22 @@ async def dashboard() -> HTMLResponse:
                     const result = await response.json();
                     
                     if (result.success) {{
-                        showToast('✅ Sync completed!', 'success');
+                        alert('✅ Sync completed!');
                         loadFiles(); // Reload files
                     }} else {{
-                        showToast(`❌ Sync failed: ${{result.error}}`, 'error');
+                        alert(`❌ Sync failed:\\n${{result.error}}`);
                     }}
                 }} catch (error) {{
-                    showToast(`❌ Error: ${{error.message}}`, 'error');
-                }}
+                    alert(`❌ Error: ${{error.message}}`);
                 }} finally {{
                     btn.disabled = false;
                     icon.classList.remove('fa-spin');
                 }}
             }}
             
-            // Toast Notification System
-            function showToast(message, type = 'success') {{
-                const toast = document.createElement('div');
-                toast.className = `toast toast-${{type}}`;
-                toast.innerHTML = `
-                    <i class="fas fa-${{type === 'success' ? 'check-circle' : 'exclamation-circle'}}"></i>
-                    <span>${{message}}</span>
-                `;
-                document.body.appendChild(toast);
-                
-                // Trigger animation
-                setTimeout(() => toast.classList.add('show'), 100);
-                
-                // Remove after 3 seconds
-                setTimeout(() => {{
-                    toast.classList.remove('show');
-                    setTimeout(() => toast.remove(), 300);
-                }}, 3000);
-            }}
-            
-            // Download File Function
-            async function downloadFile(url, filename) {{
+            // Download File Function with alert
+            async function downloadFile(url, filename, event) {{
+                event.preventDefault();
                 try {{
                     const response = await fetch(url);
                     const blob = await response.blob();
@@ -4558,10 +4488,10 @@ async def dashboard() -> HTMLResponse:
                     document.body.removeChild(a);
                     window.URL.revokeObjectURL(downloadUrl);
                     
-                    // Show success toast
-                    showToast('✅ Download finished!', 'success');
+                    // Show success alert
+                    alert('✅ Download finished!');
                 }} catch (error) {{
-                    showToast('❌ Download failed!', 'error');
+                    alert('❌ Download failed!');
                     console.error('Download error:', error);
                 }}
             }}
