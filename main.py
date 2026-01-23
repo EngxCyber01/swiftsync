@@ -4581,14 +4581,30 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Use download endpoint that forces download with Content-Disposition header
+                    // Use download endpoint that forces download
                     const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}`;
-                    window.location.href = downloadUrl;
                     
-                    // Show success notification
+                    // Fetch the file and create blob for mobile compatibility
+                    const response = await fetch(downloadUrl);
+                    if (!response.ok) throw new Error('Download failed');
+                    
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    
+                    // Create hidden link and trigger download
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    // Cleanup
                     setTimeout(() => {{
-                        showNotification('✅ Download started!', 'success');
-                    }}, 300);
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(blobUrl);
+                        showNotification('✅ Download finished!', 'success');
+                    }}, 100);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
