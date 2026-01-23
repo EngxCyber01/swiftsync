@@ -1410,11 +1410,17 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
         <div class="container">
             <div class="header">
                 <div class="header-left">
-                    <div class="logo">
-                        <i class="fas fa-shield-alt"></i>
+                    <div class="logo-icon" style="width: 50px; height: 50px; border-radius: 12px; position: relative; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+                        <div style="position: absolute; top: 0; left: 0; right: 0; height: 33.33%; background: linear-gradient(180deg, #CE1126 0%, #DC143C 50%, #8B0000 100%);"></div>
+                        <div style="position: absolute; top: 33.33%; left: 0; right: 0; height: 33.33%; background: linear-gradient(135deg, #FFFFFF 0%, #FAFAFA 30%, #F8F8F8 60%, #F0F0F0 100%); display: flex; align-items: center; justify-content: center;">
+                            <div style="width: 14px; height: 14px; background: radial-gradient(circle at 30% 30%, #FFFACD 0%, #FFD700 30%, #FFA500 60%, #FF8C00 100%); border-radius: 50%; box-shadow: 0 0 8px rgba(255, 215, 0, 1), 0 0 16px rgba(255, 165, 0, 0.8); position: relative;">
+                                <div style="content: ''; position: absolute; top: 50%; left: 50%; width: 35px; height: 35px; transform: translate(-50%, -50%); background: repeating-conic-gradient(from 0deg, transparent 0deg 8deg, rgba(255, 215, 0, 0.35) 8deg 16deg); border-radius: 50%;"></div>
+                            </div>
+                        </div>
+                        <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 33.33%; background: linear-gradient(180deg, #006600 0%, #228B22 50%, #32CD32 100%);"></div>
                     </div>
                     <div>
-                        <h1>Admin SOC</h1>
+                        <h1>Admin <span style="color: #FFD700;">SOC</span></h1>
                         <div class="header-subtitle">Security Operations Center</div>
                     </div>
                 </div>
@@ -2311,14 +2317,14 @@ async def dashboard() -> HTMLResponse:
                 position: absolute;
                 top: 50%;
                 left: 50%;
-                width: 20px;
-                height: 20px;
+                width: 35px;
+                height: 35px;
                 transform: translate(-50%, -50%);
                 background: 
                     repeating-conic-gradient(
                         from 0deg,
                         transparent 0deg 8deg,
-                        rgba(255, 215, 0, 0.2) 8deg 16deg
+                        rgba(255, 215, 0, 0.35) 8deg 16deg
                     );
                 border-radius: 50%;
                 animation: sunRays 8s linear infinite;
@@ -2326,9 +2332,9 @@ async def dashboard() -> HTMLResponse:
             }}
             
             @keyframes sunRays {{
-                0% {{ transform: translate(-50%, -50%) rotate(0deg) scale(1); opacity: 0.4; }}
-                50% {{ transform: translate(-50%, -50%) rotate(180deg) scale(1.05); opacity: 0.6; }}
-                100% {{ transform: translate(-50%, -50%) rotate(360deg) scale(1); opacity: 0.4; }}
+                0% {{ transform: translate(-50%, -50%) rotate(0deg) scale(1); opacity: 0.5; }}
+                50% {{ transform: translate(-50%, -50%) rotate(180deg) scale(1.08); opacity: 0.8; }}
+                100% {{ transform: translate(-50%, -50%) rotate(360deg) scale(1); opacity: 0.5; }}
             }}
             
             .logo-icon .sun::after {{
@@ -4553,20 +4559,31 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Show downloading notification
-                    showNotification('⏬ Downloading...', 'info');
+                    // Fetch the file as blob
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error('Download failed');
                     
-                    // Create hidden iframe to trigger download
-                    const iframe = document.createElement('iframe');
-                    iframe.style.display = 'none';
-                    iframe.src = url;
-                    document.body.appendChild(iframe);
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
                     
-                    // Clean up and show success
+                    // Create and trigger download
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = filename;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    // Clean up after download starts
                     setTimeout(() => {{
-                        document.body.removeChild(iframe);
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(blobUrl);
+                    }}, 100);
+                    
+                    // Show success notification
+                    setTimeout(() => {{
                         showNotification('✅ Download finished!', 'success');
-                    }}, 1000);
+                    }}, 800);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
