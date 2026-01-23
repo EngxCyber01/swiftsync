@@ -2266,8 +2266,8 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .logo-icon .sun {{
-                width: 24px;
-                height: 24px;
+                width: 14px;
+                height: 14px;
                 background: radial-gradient(circle at 30% 30%, 
                     #FFFACD 0%, 
                     #FFD700 30%, 
@@ -2280,9 +2280,9 @@ async def dashboard() -> HTMLResponse:
                 transform: translate(-50%, -50%);
                 animation: sunPulse 3s ease-in-out infinite;
                 box-shadow: 
-                    0 0 15px rgba(255, 215, 0, 1),
-                    0 0 30px rgba(255, 165, 0, 0.8),
-                    0 0 45px rgba(255, 140, 0, 0.6),
+                    0 0 8px rgba(255, 215, 0, 1),
+                    0 0 16px rgba(255, 165, 0, 0.8),
+                    0 0 24px rgba(255, 140, 0, 0.6),
                     inset -3px -3px 6px rgba(255, 140, 0, 0.4),
                     inset 2px 2px 4px rgba(255, 250, 205, 0.6);
                 z-index: 10;
@@ -3766,6 +3766,57 @@ async def dashboard() -> HTMLResponse:
                 font-size: 1rem;
             }}
             
+            /* Notification System - Top Smooth */
+            .notification {{
+                position: fixed;
+                top: -100px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: var(--bg-secondary);
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                padding: 1rem 2rem;
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 217, 255, 0.2);
+                backdrop-filter: blur(10px);
+                z-index: 10000;
+                transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+                min-width: 300px;
+                max-width: 90vw;
+            }}
+            
+            .notification.show {{
+                top: 2rem;
+            }}
+            
+            .notification-success {{
+                border-left: 4px solid var(--success);
+                background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), var(--bg-secondary));
+            }}
+            
+            .notification-success i {{
+                color: var(--success);
+                font-size: 1.3rem;
+            }}
+            
+            .notification-error {{
+                border-left: 4px solid #ef4444;
+                background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), var(--bg-secondary));
+            }}
+            
+            .notification-error i {{
+                color: #ef4444;
+                font-size: 1.3rem;
+            }}
+            
+            .notification span {{
+                color: var(--text-primary);
+                font-weight: 600;
+                font-size: 1rem;
+            }}
+            
             /* Responsive */
             @media (max-width: 768px) {{
                 .container {{ padding: 1.5rem 1rem; }}
@@ -4460,38 +4511,62 @@ async def dashboard() -> HTMLResponse:
                     const result = await response.json();
                     
                     if (result.success) {{
-                        alert('✅ Sync completed!');
+                        showNotification('✅ Sync completed!', 'success');
                         loadFiles(); // Reload files
                     }} else {{
-                        alert(`❌ Sync failed:\\n${{result.error}}`);
+                        showNotification(`❌ Sync failed: ${{result.error}}`, 'error');
                     }}
                 }} catch (error) {{
-                    alert(`❌ Error: ${{error.message}}`);
+                    showNotification(`❌ Error: ${{error.message}}`, 'error');
                 }} finally {{
                     btn.disabled = false;
                     icon.classList.remove('fa-spin');
                 }}
             }}
             
-            // Download File Function with alert
+            // Show Notification Function
+            function showNotification(message, type = 'success') {{
+                const notification = document.createElement('div');
+                notification.className = `notification notification-${{type}}`;
+                notification.innerHTML = `
+                    <i class="fas fa-${{type === 'success' ? 'check-circle' : 'exclamation-circle'}}"></i>
+                    <span>${{message}}</span>
+                `;
+                document.body.appendChild(notification);
+                
+                // Trigger animation
+                setTimeout(() => notification.classList.add('show'), 100);
+                
+                // Remove after 3 seconds
+                setTimeout(() => {{
+                    notification.classList.remove('show');
+                    setTimeout(() => notification.remove(), 400);
+                }}, 3000);
+            }}
+            
+            // Download File Function
             async function downloadFile(url, filename, event) {{
-                event.preventDefault();
+                if (event) event.preventDefault();
                 try {{
-                    const response = await fetch(url);
-                    const blob = await response.blob();
-                    const downloadUrl = window.URL.createObjectURL(blob);
+                    // Use hidden link to trigger download
                     const a = document.createElement('a');
-                    a.href = downloadUrl;
+                    a.href = url;
                     a.download = filename;
+                    a.style.display = 'none';
                     document.body.appendChild(a);
                     a.click();
-                    document.body.removeChild(a);
-                    window.URL.revokeObjectURL(downloadUrl);
                     
-                    // Show success alert
-                    alert('✅ Download finished!');
+                    // Wait a moment before removing
+                    setTimeout(() => {{
+                        document.body.removeChild(a);
+                    }}, 100);
+                    
+                    // Show success notification
+                    setTimeout(() => {{
+                        showNotification('✅ Download finished!', 'success');
+                    }}, 500);
                 }} catch (error) {{
-                    alert('❌ Download failed!');
+                    showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
                 }}
             }}
