@@ -290,7 +290,7 @@ def download_material(session: requests.Session, item_id: str) -> Tuple[Path, st
             dt = parsedate_to_datetime(upload_date)
             upload_date = dt.isoformat()
         except Exception:
-            upload_date = datetime.now().isoformat()
+            upload_date = datetime.now(pytz.timezone('Asia/Baghdad')).isoformat()
 
     with open(target, "wb") as file:
         for chunk in response.iter_content(chunk_size=8192):

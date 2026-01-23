@@ -11,6 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
+import pytz
 from auth import AuthClient, AuthConfig
 from student_info import get_student_info
 
@@ -24,12 +25,13 @@ class SessionManager:
     def create_session(self, student_id: str, cookies: Dict, username: str) -> str:
         """Create a new session and return session token"""
         session_token = secrets.token_urlsafe(32)
+        iraq_tz = pytz.timezone('Asia/Baghdad')
         self.sessions[session_token] = {
             'student_id': student_id,
             'cookies': cookies,
             'username': username,
-            'created_at': datetime.now(),
-            'last_accessed': datetime.now()
+            'created_at': datetime.now(iraq_tz),
+            'last_accessed': datetime.now(iraq_tz)
         }
         return session_token
     
@@ -39,14 +41,15 @@ class SessionManager:
             return None
         
         session = self.sessions[session_token]
+        iraq_tz = pytz.timezone('Asia/Baghdad')
         
         # Check if expired
-        if datetime.now() - session['created_at'] > self.session_ttl:
+        if datetime.now(iraq_tz) - session['created_at'] > self.session_ttl:
             del self.sessions[session_token]
             return None
         
         # Update last accessed
-        session['last_accessed'] = datetime.now()
+        session['last_accessed'] = datetime.now(iraq_tz)
         return session
     
     def delete_session(self, session_token: str) -> bool:
@@ -58,7 +61,8 @@ class SessionManager:
     
     def cleanup_expired_sessions(self):
         """Remove expired sessions (called periodically)"""
-        now = datetime.now()
+        iraq_tz = pytz.timezone('Asia/Baghdad')
+        now = datetime.now(iraq_tz)
         expired_tokens = [
             token for token, session in self.sessions.items()
             if now - session['created_at'] > self.session_ttl

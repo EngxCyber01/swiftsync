@@ -5,6 +5,7 @@ and populate it with the file's current modified time as a fallback.
 import sqlite3
 from pathlib import Path
 from datetime import datetime
+import pytz
 
 DB_PATH = Path("data") / "lecture_sync.db"
 DOWNLOAD_DIR = Path("lectures_storage")
@@ -57,9 +58,9 @@ def migrate_upload_dates():
                 upload_date = downloaded_at
                 print(f"  - {filename or item_id}: Using downloaded_at {upload_date}")
             
-            # Last resort: use current time
+            # Last resort: use current time (Iraq timezone)
             if not upload_date:
-                upload_date = datetime.now().isoformat()
+                upload_date = datetime.now(pytz.timezone('Asia/Baghdad')).isoformat()
                 print(f"  - {filename or item_id}: Using current time {upload_date}")
             
             cursor.execute("UPDATE synced_items SET upload_date = ? WHERE id = ?", (upload_date, item_id))

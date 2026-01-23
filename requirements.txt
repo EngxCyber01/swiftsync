@@ -8,3 +8,4 @@ openai
 aiofiles
 google-generativeai
 aiohttp
+pytz

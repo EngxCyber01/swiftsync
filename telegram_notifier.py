@@ -5,6 +5,7 @@ Sends notifications to Telegram group when new lectures are uploaded
 import logging
 import requests
 from datetime import datetime
+import pytz
 from typing import Optional
 from pathlib import Path
 
@@ -70,9 +71,10 @@ def format_lecture_notification(
     Returns:
         Formatted message string with Markdown formatting
     """
-    # Format the date nicely
+    # Format the date nicely (Iraq timezone: Asia/Baghdad UTC+3)
     if not upload_date:
-        upload_date = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+        iraq_tz = pytz.timezone('Asia/Baghdad')
+        upload_date = datetime.now(iraq_tz).strftime("%B %d, %Y at %I:%M %p")
     
     # Build the message with emojis and formatting
     message_parts = [
@@ -132,7 +134,7 @@ def notify_new_lecture(
             lecture_title=lecture_title,
             course_name=subject or "General Studies",
             instructor_name=None,  # Can be enhanced later to extract instructor info
-            upload_date=datetime.now().strftime("%B %d, %Y at %I:%M %p"),
+            upload_date=datetime.now(pytz.timezone('Asia/Baghdad')).strftime("%B %d, %Y at %I:%M %p"),
             lecture_link=lecture_link
         )
         
@@ -163,8 +165,9 @@ def notify_multiple_lectures(
     try:
         subject_info = f" in *{subject}*" if subject else ""
         
-        # Use provided upload date or current time
-        date_str = upload_date if upload_date else datetime.now().strftime("%B %d, %Y at %I:%M %p")
+        # Use provided upload date or current time (Iraq timezone: Asia/Baghdad UTC+3)
+        iraq_tz = pytz.timezone('Asia/Baghdad')
+        date_str = upload_date if upload_date else datetime.now(iraq_tz).strftime("%B %d, %Y at %I:%M %p")
         
         message = f"""📚 *Multiple New Lectures Uploaded!*
 

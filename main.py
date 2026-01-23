@@ -2161,9 +2161,6 @@ async def dashboard() -> HTMLResponse:
             .logo-icon {{
                 width: 50px;
                 height: 50px;
-                background-image: url('/KurdishFlag.jpg');
-                background-size: cover;
-                background-position: center;
                 border-radius: 15px;
                 display: flex;
                 align-items: center;
@@ -2172,6 +2169,55 @@ async def dashboard() -> HTMLResponse:
                 box-shadow: 0 0 30px rgba(255, 200, 0, 0.4);
                 animation: glow 3s ease-in-out infinite;
                 border: 2px solid rgba(255, 255, 255, 0.1);
+                overflow: hidden;
+                position: relative;
+            }}
+            
+            .logo-icon::before {{
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 33.33%;
+                background: linear-gradient(180deg, #DC143C 0%, #C41230 100%);
+            }}
+            
+            .logo-icon::after {{
+                content: '';
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                height: 33.33%;
+                background: linear-gradient(180deg, #1B7A1B 0%, #228B22 100%);
+            }}
+            
+            .logo-icon .flag-center {{
+                position: absolute;
+                top: 33.33%;
+                left: 0;
+                right: 0;
+                height: 33.34%;
+                background: linear-gradient(90deg, #FFFFFF 0%, #F8F8F8 100%);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }}
+            
+            .logo-icon .sun {{
+                width: 16px;
+                height: 16px;
+                background: radial-gradient(circle, #FFD700 0%, #FFA500 100%);
+                border-radius: 50%;
+                position: relative;
+                animation: sunGlow 3s ease-in-out infinite;
+                box-shadow: 0 0 8px rgba(255, 215, 0, 0.6);
+            }}
+            
+            @keyframes sunGlow {{
+                0%, 100% {{ box-shadow: 0 0 8px rgba(255, 215, 0, 0.6); }}
+                50% {{ box-shadow: 0 0 16px rgba(255, 215, 0, 0.9); }}
             }}
             
             @keyframes glow {{
@@ -3558,8 +3604,6 @@ async def dashboard() -> HTMLResponse:
                 .stats {{ grid-template-columns: 1fr; }}
                 .toolbar {{ flex-direction: column; align-items: stretch; }}
                 .search-box {{ min-width: 100%; }}
-                .file-item {{ flex-direction: column; align-items: flex-start; }}
-                .file-size, .download-btn, .summary-btn {{ width: 100%; justify-content: center; }}
                 .modal-content {{ max-width: 95%; margin: 1rem; }}
                 .modal-header {{ padding: 1.5rem; }}
                 .modal-body {{ padding: 1.5rem; }}
@@ -3568,6 +3612,247 @@ async def dashboard() -> HTMLResponse:
                 .zone-tab {{ padding: 0.75rem 1.5rem; }}
                 .attendance-login-card {{ padding: 2rem 1.5rem; }}
                 .attendance-header {{ flex-direction: column; gap: 1rem; align-items: flex-start; }}
+                
+                /* Mobile-specific: Subject sections - better spacing */
+                .subject-section {{
+                    margin-bottom: 1.25rem;
+                    border-radius: 16px;
+                }}
+                
+                .subject-header {{
+                    padding: 1.25rem 1rem;
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 1rem;
+                }}
+                
+                .subject-title {{
+                    font-size: 1rem;
+                    gap: 0.75rem;
+                    flex-wrap: wrap;
+                    width: 100%;
+                }}
+                
+                .subject-title i {{
+                    font-size: 1.1rem;
+                }}
+                
+                .file-count {{
+                    font-size: 0.75rem;
+                    padding: 0.3rem 0.7rem;
+                    margin-left: 0;
+                    white-space: nowrap;
+                }}
+                
+                .collapse-btn {{
+                    position: absolute;
+                    top: 1.25rem;
+                    right: 1rem;
+                    width: 36px;
+                    height: 36px;
+                }}
+                
+                /* Mobile-specific: File items - organized and comfortable */
+                .subject-files {{
+                    padding: 1rem;
+                }}
+                
+                .file-item {{
+                    flex-direction: column;
+                    align-items: stretch;
+                    gap: 1rem;
+                    padding: 1.25rem 1rem;
+                    margin-bottom: 1rem;
+                }}
+                
+                .file-item:hover {{
+                    transform: none;
+                }}
+                
+                .file-icon {{
+                    width: 48px;
+                    height: 48px;
+                    font-size: 1.3rem;
+                    align-self: flex-start;
+                }}
+                
+                .file-info {{
+                    width: 100%;
+                    padding-left: 0;
+                }}
+                
+                .file-name {{
+                    font-size: 0.95rem;
+                    line-height: 1.5;
+                    margin-bottom: 0.75rem;
+                    word-break: break-word;
+                }}
+                
+                .file-meta {{
+                    font-size: 0.85rem;
+                    margin-top: 0.5rem;
+                }}
+                
+                .file-size {{
+                    width: 100%;
+                    justify-content: flex-start;
+                    padding: 0.75rem;
+                    background: var(--glass);
+                    border-radius: 8px;
+                    font-size: 0.9rem;
+                }}
+                
+                .download-btn,
+                .summary-btn {{
+                    width: 100%;
+                    justify-content: center;
+                    padding: 1rem;
+                    font-size: 0.95rem;
+                }}
+                
+                .summary-btn {{
+                    margin-top: 0.5rem;
+                }}
+                
+                .summarize-all-btn {{
+                    width: 100%;
+                    padding: 1rem;
+                    font-size: 0.95rem;
+                    margin-top: 0.75rem;
+                }}
+                
+                /* Mobile-specific: Attendance section - better spacing and readability */
+                .attendance-card {{
+                    padding: 1.5rem 1rem;
+                    margin-bottom: 1.25rem;
+                    border-radius: 16px;
+                }}
+                
+                .attendance-card-header {{
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 1.25rem;
+                    margin-bottom: 1.25rem;
+                    padding-bottom: 1.25rem;
+                }}
+                
+                .module-info {{
+                    width: 100%;
+                }}
+                
+                .module-name {{
+                    font-size: 1.1rem;
+                    gap: 0.6rem;
+                    line-height: 1.4;
+                    flex-wrap: wrap;
+                }}
+                
+                .module-name i {{
+                    font-size: 1rem;
+                }}
+                
+                .class-name {{
+                    font-size: 0.9rem;
+                    margin-top: 0.5rem;
+                    line-height: 1.4;
+                }}
+                
+                .absence-badge {{
+                    min-width: 100%;
+                    height: auto;
+                    padding: 1.25rem;
+                    flex-direction: row;
+                    justify-content: space-between;
+                    border-radius: 12px;
+                }}
+                
+                .absence-count {{
+                    font-size: 2.5rem;
+                }}
+                
+                .absence-label {{
+                    font-size: 0.85rem;
+                }}
+                
+                .attendance-card-body {{
+                    grid-template-columns: 1fr;
+                    gap: 1rem;
+                }}
+                
+                .attendance-detail {{
+                    padding: 1rem;
+                    gap: 1rem;
+                }}
+                
+                .detail-icon {{
+                    width: 44px;
+                    height: 44px;
+                    font-size: 1.2rem;
+                }}
+                
+                .detail-label {{
+                    font-size: 0.8rem;
+                    margin-bottom: 0.35rem;
+                }}
+                
+                .detail-value {{
+                    font-size: 1rem;
+                    line-height: 1.4;
+                }}
+                
+                .attendance-stats {{
+                    grid-template-columns: 1fr;
+                    gap: 1rem;
+                    padding: 1.25rem 1rem;
+                    margin-bottom: 1.5rem;
+                }}
+                
+                .stat-item {{
+                    padding: 1.25rem 1rem;
+                }}
+                
+                .stat-item-value {{
+                    font-size: 2.25rem;
+                    margin-bottom: 0.6rem;
+                }}
+                
+                .stat-item-label {{
+                    font-size: 0.9rem;
+                    line-height: 1.3;
+                }}
+                
+                .absence-list li {{
+                    padding: 0.85rem;
+                    margin-bottom: 0.5rem;
+                    font-size: 0.95rem;
+                    gap: 0.75rem;
+                    line-height: 1.5;
+                }}
+                
+                .absence-details-section {{
+                    padding: 1.25rem 1rem;
+                    margin-top: 1.25rem;
+                }}
+                
+                .no-absences {{
+                    padding: 3rem 1.5rem;
+                }}
+                
+                .no-absences i {{
+                    font-size: 3.5rem;
+                    margin-bottom: 1.25rem;
+                }}
+                
+                .no-absences h3 {{
+                    font-size: 1.35rem;
+                    margin-bottom: 0.75rem;
+                    line-height: 1.4;
+                }}
+                
+                .no-absences p {{
+                    font-size: 0.95rem;
+                    line-height: 1.5;
+                }}
             }}
         </style>
     </head>
@@ -3576,7 +3861,11 @@ async def dashboard() -> HTMLResponse:
             <!-- Navigation -->
             <nav class="nav">
                 <div class="logo">
-                    <div class="logo-icon"></div>
+                    <div class="logo-icon">
+                        <div class="flag-center">
+                            <div class="sun"></div>
+                        </div>
+                    </div>
                     <div class="logo-text">
                         <h1>SwiftSync</h1>
                         <p>SSCreative</p>

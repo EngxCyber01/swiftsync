@@ -5,6 +5,7 @@ Handles visitor logging and IP blacklist management
 import sqlite3
 import os
 from datetime import datetime
+import pytz
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -62,7 +63,7 @@ def log_visitor(ip_address: str, action: str, user_agent: str = None, path: str 
             cursor.execute("""
                 INSERT INTO visitor_logs (ip_address, timestamp, action_performed, user_agent, path, username)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (ip_address, datetime.now().isoformat(), action, user_agent, path, username))
+            """, (ip_address, datetime.now(pytz.timezone('Asia/Baghdad')).isoformat(), action, user_agent, path, username))
             conn.commit()
     except Exception as e:
         print(f"Error logging visitor: {e}")
@@ -89,7 +90,7 @@ def block_ip(ip_address: str, reason: str = "Manual block"):
         cursor.execute("""
             INSERT OR IGNORE INTO blacklist (ip_address, reason, blocked_at)
             VALUES (?, ?, ?)
-        """, (ip_address, reason, datetime.now().isoformat()))
+        """, (ip_address, reason, datetime.now(pytz.timezone('Asia/Baghdad')).isoformat()))
         conn.commit()
 
 
@@ -376,7 +377,7 @@ def log_threat_detection(ip_address: str, threat_type: str, details: str):
         cursor.execute("""
             INSERT INTO threat_logs (ip_address, threat_type, details, detected_at, action_taken)
             VALUES (?, ?, ?, ?, ?)
-        """, (ip_address, threat_type, details, datetime.now().isoformat(), "AUTO_BLOCKED"))
+        """, (ip_address, threat_type, details, datetime.now(pytz.timezone('Asia/Baghdad')).isoformat(), "AUTO_BLOCKED"))
         conn.commit()
 
 
