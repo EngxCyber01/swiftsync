@@ -4581,30 +4581,28 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Use download endpoint that forces download
-                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}`;
+                    // Add unique timestamp to prevent "download again" dialog
+                    const timestamp = new Date().getTime();
+                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?t=${{timestamp}}`;
                     
-                    // Fetch the file and create blob for mobile compatibility
-                    const response = await fetch(downloadUrl);
-                    if (!response.ok) throw new Error('Download failed');
+                    // Create invisible iframe for silent download
+                    const iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.style.position = 'fixed';
+                    iframe.style.top = '-9999px';
+                    document.body.appendChild(iframe);
                     
-                    const blob = await response.blob();
-                    const blobUrl = URL.createObjectURL(blob);
+                    // Set iframe source to trigger download
+                    iframe.src = downloadUrl;
                     
-                    // Create hidden link and trigger download
-                    const a = document.createElement('a');
-                    a.style.display = 'none';
-                    a.href = blobUrl;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
+                    // Show notification immediately
+                    showNotification('⏬ Downloading...', 'info');
                     
-                    // Cleanup
+                    // Remove iframe and show success after download starts
                     setTimeout(() => {{
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(blobUrl);
+                        document.body.removeChild(iframe);
                         showNotification('✅ Download finished!', 'success');
-                    }}, 100);
+                    }}, 2000);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
