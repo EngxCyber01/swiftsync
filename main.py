@@ -482,26 +482,35 @@ async def list_files() -> JSONResponse:
 
 
 @app.get("/api/download/{filename}")
-async def download_file(filename: str):
-    """Download a file with proper Content-Disposition header to force download"""
+async def download_file(filename: str, _: str = None):
+    """Download a file with forced attachment headers - prevents preview and caching"""
     from fastapi.responses import FileResponse
     import urllib.parse
+    import os
     
     file_path = DOWNLOAD_DIR / filename
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     
+    # Get file size for Content-Length
+    file_size = os.path.getsize(file_path)
+    
     # URL encode filename for proper header
     encoded_filename = urllib.parse.quote(filename)
+    
+    # Detect content type - use application/pdf for PDFs
+    content_type = 'application/pdf' if filename.lower().endswith('.pdf') else 'application/octet-stream'
     
     return FileResponse(
         path=file_path,
         filename=filename,
-        media_type='application/octet-stream',
+        media_type=content_type,
         headers={
             'Content-Disposition': f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}',
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Content-Type': content_type,
+            'Content-Length': str(file_size),
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
             'Pragma': 'no-cache',
             'Expires': '0'
         }
@@ -4584,15 +4593,16 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Add random parameter to force fresh download and bypass cache
-                    const randomId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{randomId}}`;
+                    // Generate unique download URL with timestamp to prevent 'download again' dialog
+                    const timestamp = new Date().getTime();
+                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{timestamp}}`;
                     
-                    // Fetch with no-cache to prevent browser caching
+                    // Fetch with strict no-cache policy
                     const response = await fetch(downloadUrl, {{
                         cache: 'no-store',
                         headers: {{
-                            'Cache-Control': 'no-cache'
+                            'Cache-Control': 'no-cache, no-store, must-revalidate',
+                            'Pragma': 'no-cache'
                         }}
                     }});
                     
