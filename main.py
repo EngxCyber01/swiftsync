@@ -2266,14 +2266,13 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .logo-icon .sun {{
-                width: 20px;
-                height: 20px;
-                background: radial-gradient(circle at 35% 35%, 
-                    #FFF59D 0%, 
-                    #FFE57F 20%, 
-                    #FFD700 50%, 
-                    #FFC107 80%, 
-                    #FF8F00 100%);
+                width: 24px;
+                height: 24px;
+                background: radial-gradient(circle at 30% 30%, 
+                    #FFFACD 0%, 
+                    #FFD700 30%, 
+                    #FFA500 60%, 
+                    #FF8C00 100%);
                 border-radius: 50%;
                 position: absolute;
                 top: 50%;
@@ -2281,10 +2280,11 @@ async def dashboard() -> HTMLResponse:
                 transform: translate(-50%, -50%);
                 animation: sunPulse 3s ease-in-out infinite;
                 box-shadow: 
-                    0 0 12px rgba(255, 215, 0, 0.9),
-                    0 0 24px rgba(255, 193, 7, 0.6),
-                    0 0 36px rgba(255, 152, 0, 0.4),
-                    inset -2px -2px 4px rgba(255, 111, 0, 0.3);
+                    0 0 15px rgba(255, 215, 0, 1),
+                    0 0 30px rgba(255, 165, 0, 0.8),
+                    0 0 45px rgba(255, 140, 0, 0.6),
+                    inset -3px -3px 6px rgba(255, 140, 0, 0.4),
+                    inset 2px 2px 4px rgba(255, 250, 205, 0.6);
                 z-index: 10;
             }}
             
@@ -2292,17 +2292,17 @@ async def dashboard() -> HTMLResponse:
                 0%, 100% {{ 
                     transform: translate(-50%, -50%) scale(1) rotate(0deg);
                     box-shadow: 
-                        0 0 12px rgba(255, 215, 0, 0.9),
-                        0 0 24px rgba(255, 193, 7, 0.6),
-                        0 0 36px rgba(255, 152, 0, 0.4);
+                        0 0 15px rgba(255, 215, 0, 1),
+                        0 0 30px rgba(255, 165, 0, 0.8),
+                        0 0 45px rgba(255, 140, 0, 0.6);
                 }}
                 50% {{ 
-                    transform: translate(-50%, -50%) scale(1.08) rotate(45deg);
+                    transform: translate(-50%, -50%) scale(1.12) rotate(45deg);
                     box-shadow: 
-                        0 0 16px rgba(255, 215, 0, 1),
-                        0 0 32px rgba(255, 193, 7, 0.8),
-                        0 0 48px rgba(255, 152, 0, 0.6),
-                        0 0 64px rgba(255, 111, 0, 0.3);
+                        0 0 20px rgba(255, 215, 0, 1),
+                        0 0 40px rgba(255, 165, 0, 1),
+                        0 0 60px rgba(255, 140, 0, 0.8),
+                        0 0 80px rgba(255, 140, 0, 0.4);
                 }}
             }}
             
@@ -2311,14 +2311,14 @@ async def dashboard() -> HTMLResponse:
                 position: absolute;
                 top: 50%;
                 left: 50%;
-                width: 36px;
-                height: 36px;
+                width: 40px;
+                height: 40px;
                 transform: translate(-50%, -50%);
                 background: 
                     repeating-conic-gradient(
                         from 0deg,
-                        transparent 0deg 10deg,
-                        rgba(255, 215, 0, 0.15) 10deg 20deg
+                        transparent 0deg 8deg,
+                        rgba(255, 215, 0, 0.3) 8deg 16deg
                     );
                 border-radius: 50%;
                 animation: sunRays 8s linear infinite;
@@ -2336,17 +2336,17 @@ async def dashboard() -> HTMLResponse:
                 position: absolute;
                 top: 50%;
                 left: 50%;
-                width: 28px;
-                height: 28px;
+                width: 30px;
+                height: 30px;
                 transform: translate(-50%, -50%);
-                background: radial-gradient(circle, rgba(255, 255, 255, 0.4) 0%, transparent 70%);
+                background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, transparent 70%);
                 border-radius: 50%;
                 animation: sunGlare 4s ease-in-out infinite;
             }}
             
             @keyframes sunGlare {{
-                0%, 100% {{ opacity: 0.3; transform: translate(-50%, -50%) scale(0.8); }}
-                50% {{ opacity: 0.6; transform: translate(-50%, -50%) scale(1); }}
+                0%, 100% {{ opacity: 0.4; transform: translate(-50%, -50%) scale(0.8); }}
+                50% {{ opacity: 0.8; transform: translate(-50%, -50%) scale(1.1); }}
             }}
             
             .logo-text h1 {{
@@ -4364,7 +4364,7 @@ async def dashboard() -> HTMLResponse:
                                                 <span>Get Summary</span>
                                             </button>
                                         ` : ''}}
-                                        <a href="${{file.url}}" class="download-btn" download>
+                                        <a href="${{file.url}}" class="download-btn" target="_blank" rel="noopener noreferrer">
                                             <i class="fas fa-download"></i>
                                             <span>Download</span>
                                         </a>
