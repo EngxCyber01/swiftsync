@@ -2311,14 +2311,14 @@ async def dashboard() -> HTMLResponse:
                 position: absolute;
                 top: 50%;
                 left: 50%;
-                width: 40px;
-                height: 40px;
+                width: 20px;
+                height: 20px;
                 transform: translate(-50%, -50%);
                 background: 
                     repeating-conic-gradient(
                         from 0deg,
                         transparent 0deg 8deg,
-                        rgba(255, 215, 0, 0.3) 8deg 16deg
+                        rgba(255, 215, 0, 0.2) 8deg 16deg
                     );
                 border-radius: 50%;
                 animation: sunRays 8s linear infinite;
@@ -2326,9 +2326,9 @@ async def dashboard() -> HTMLResponse:
             }}
             
             @keyframes sunRays {{
-                0% {{ transform: translate(-50%, -50%) rotate(0deg) scale(1); opacity: 0.6; }}
-                50% {{ transform: translate(-50%, -50%) rotate(180deg) scale(1.1); opacity: 0.9; }}
-                100% {{ transform: translate(-50%, -50%) rotate(360deg) scale(1); opacity: 0.6; }}
+                0% {{ transform: translate(-50%, -50%) rotate(0deg) scale(1); opacity: 0.4; }}
+                50% {{ transform: translate(-50%, -50%) rotate(180deg) scale(1.05); opacity: 0.6; }}
+                100% {{ transform: translate(-50%, -50%) rotate(360deg) scale(1); opacity: 0.4; }}
             }}
             
             .logo-icon .sun::after {{
@@ -4441,11 +4441,11 @@ async def dashboard() -> HTMLResponse:
                                             </div>
                                         </div>
                                         <div class="file-size">${{formatBytes(file.size_bytes)}}</div>
-                                        <a href="${{file.url}}" class="open-btn" target="_blank" rel="noopener noreferrer">
+                                        <a href="${{file.url}}" class="open-btn" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();">
                                             <i class="fas fa-external-link-alt"></i>
                                             <span>Open</span>
                                         </a>
-                                        <button class="download-btn" onclick="downloadFile('${{file.url}}', '${{file.name}}', event)">
+                                        <button class="download-btn" onclick="downloadFile('${{file.url}}', '${{file.name}}', event); return false;">
                                             <i class="fas fa-download"></i>
                                             <span>Download</span>
                                         </button>
@@ -4547,29 +4547,26 @@ async def dashboard() -> HTMLResponse:
             
             // Download File Function
             async function downloadFile(url, filename, event) {{
-                if (event) event.preventDefault();
+                if (event) {{
+                    event.preventDefault();
+                    event.stopPropagation();
+                }}
+                
                 try {{
-                    // Fetch the file to trigger download without browser prompt
-                    const response = await fetch(url);
-                    const blob = await response.blob();
+                    // Show downloading notification
+                    showNotification('⏬ Downloading...', 'info');
                     
-                    // Create object URL from blob
-                    const blobUrl = window.URL.createObjectURL(blob);
+                    // Create hidden iframe to trigger download
+                    const iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.src = url;
+                    document.body.appendChild(iframe);
                     
-                    // Create and click download link with unique timestamp
-                    const a = document.createElement('a');
-                    a.href = blobUrl;
-                    a.download = filename;
-                    a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
-                    
-                    // Clean up
+                    // Clean up and show success
                     setTimeout(() => {{
-                        document.body.removeChild(a);
-                        window.URL.revokeObjectURL(blobUrl);
+                        document.body.removeChild(iframe);
                         showNotification('✅ Download finished!', 'success');
-                    }}, 500);
+                    }}, 1000);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
@@ -4797,8 +4794,10 @@ async def dashboard() -> HTMLResponse:
                         date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
                         expires = "; expires=" + date.toUTCString();
                     }}
-                    // Use SameSite=None with Secure for cross-platform support (Android/iPhone)
-                    document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=None; Secure";
+                    // Use SameSite=None with Secure for HTTPS (production), Lax for HTTP (localhost)
+                    var isSecure = window.location.protocol === 'https:';
+                    var sameSite = isSecure ? 'SameSite=None; Secure' : 'SameSite=Lax';
+                    document.cookie = name + "=" + (value || "") + expires + "; path=/; " + sameSite;
                 }},
                 // Helper: Get cookie
                 _getCookie: function(name) {{
