@@ -2030,6 +2030,24 @@ async def dashboard() -> HTMLResponse:
                 animation: fadeInUp 0.8s ease 0.2s both;
             }}
             
+            /* Hide text cursor globally */
+            * {{
+                caret-color: transparent !important;
+            }}
+            
+            input, textarea {{
+                caret-color: transparent !important;
+            }}
+            
+            /* Hide text cursor globally */
+            * {{
+                caret-color: transparent !important;
+            }}
+            
+            input, textarea {{
+                caret-color: transparent !important;
+            }}
+            
             @keyframes pulse {{
                 0%, 100% {{ transform: scale(1); }}
                 50% {{ transform: scale(1.05); }}
@@ -2191,36 +2209,6 @@ async def dashboard() -> HTMLResponse:
                 gap: 1rem;
             }}
             
-            .kurdistan-map-logo {{
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                opacity: 0;
-                transform: scale(0.95);
-                animation: mapFadeIn 0.8s ease-out 0.2s forwards;
-            }}
-            
-            .kurdistan-map-logo svg {{
-                filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3)) drop-shadow(0 0 20px rgba(255, 215, 0, 0.15));
-                transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-            }}
-            
-            .kurdistan-map-logo:hover svg {{
-                transform: scale(1.05);
-                filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.4)) drop-shadow(0 0 30px rgba(255, 215, 0, 0.25));
-            }}
-            
-            @keyframes mapFadeIn {{
-                0% {{
-                    opacity: 0;
-                    transform: scale(0.95);
-                }}
-                100% {{
-                    opacity: 1;
-                    transform: scale(1);
-                }}
-            }}
-            
             .logo-icon {{
                 width: 60px;
                 height: 60px;
@@ -2230,7 +2218,6 @@ async def dashboard() -> HTMLResponse:
                 justify-content: center;
                 box-shadow: 0 8px 32px rgba(220, 20, 60, 0.4), 0 0 40px rgba(255, 215, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.3);
                 animation: flagGlow 4s ease-in-out infinite;
-                border: 3px solid rgba(255, 255, 255, 0.2);
                 overflow: hidden;
                 position: relative;
                 background: linear-gradient(135deg, rgba(10, 10, 10, 0.8), rgba(20, 20, 20, 0.9));
@@ -4150,51 +4137,10 @@ async def dashboard() -> HTMLResponse:
             <!-- Navigation -->
             <nav class="nav">
                 <div class="logo">
-                    <div class="kurdistan-map-logo">
-                        <svg viewBox="0 0 100 120" width="48" height="55" xmlns="http://www.w3.org/2000/svg">
-                            <defs>
-                                <!-- 3D Embossed Lighting -->
-                                <filter id="emboss" x="-50%" y="-50%" width="200%" height="200%">
-                                    <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="blur"/>
-                                    <feSpecularLighting in="blur" surfaceScale="5" specularConstant="0.8" specularExponent="20" lighting-color="#ffffff" result="light">
-                                        <fePointLight x="-20" y="-30" z="100"/>
-                                    </feSpecularLighting>
-                                    <feComposite in="light" in2="SourceAlpha" operator="in" result="highlight"/>
-                                    <feComposite in="SourceGraphic" in2="highlight" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>
-                                </filter>
-                                <linearGradient id="redGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#E63946;stop-opacity:1" />
-                                    <stop offset="100%" style="stop-color:#B71C1C;stop-opacity:1" />
-                                </linearGradient>
-                                <linearGradient id="whiteGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
-                                    <stop offset="100%" style="stop-color:#E8E8E8;stop-opacity:1" />
-                                </linearGradient>
-                                <linearGradient id="greenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#2E7D32;stop-opacity:1" />
-                                    <stop offset="100%" style="stop-color:#1B5E20;stop-opacity:1" />
-                                </linearGradient>
-                            </defs>
-                            <!-- Kurdistan Map Shape with Flag Colors -->
-                            <g filter="url(#emboss)">
-                                <!-- Top Red Section -->
-                                <path d="M25,25 Q35,20 45,22 L55,20 Q65,22 72,28 L75,35 L20,35 Q22,30 25,25 Z" 
-                                      fill="url(#redGrad)" stroke="rgba(0,0,0,0.2)" stroke-width="0.5"/>
-                                <!-- Middle White Section with Sun -->
-                                <path d="M20,35 L75,35 L75,65 L20,65 Z" 
-                                      fill="url(#whiteGrad)" stroke="rgba(0,0,0,0.1)" stroke-width="0.3"/>
-                                <!-- Golden Sun in Center -->
-                                <circle cx="47.5" cy="50" r="9" fill="#FFD700" opacity="0.95"/>
-                                <circle cx="47.5" cy="50" r="6" fill="#FFA500" opacity="0.7"/>
-                                <!-- Bottom Green Section -->
-                                <path d="M20,65 L75,65 Q70,72 60,78 L50,82 Q40,80 30,75 L22,68 Q20,66 20,65 Z" 
-                                      fill="url(#greenGrad)" stroke="rgba(0,0,0,0.2)" stroke-width="0.5"/>
-                            </g>
-                            <!-- Subtle Highlights for 3D Effect -->
-                            <path d="M25,25 Q35,20 45,22 L55,20 Q65,22 72,28" 
-                                  fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1" opacity="0.6"/>
-                            <ellipse cx="47.5" cy="48" rx="3" ry="2" fill="rgba(255,255,255,0.5)" opacity="0.4"/>
-                        </svg>
+                    <div class="logo-icon">
+                        <div class="flag-center">
+                            <div class="sun"></div>
+                        </div>
                     </div>
                     <div class="logo-text">
                         <h1>SwiftSync</h1>
@@ -5657,6 +5603,30 @@ async def dashboard() -> HTMLResponse:
                 if (installBtn) {{
                     installBtn.style.display = 'none';
                 }}
+            }});
+            
+            // OFFLINE-FIRST: Network status monitoring (console only, no UI changes)
+            // Why: Helps debug offline issues without disrupting user experience
+            function updateOnlineStatus() {{
+                const condition = navigator.onLine ? '🟢 ONLINE' : '🔴 OFFLINE';
+                console.log(`[Network Status] ${{condition}} - App continues working with cached data`);
+                
+                // Store status for API calls to handle gracefully
+                window.__networkStatus = navigator.onLine;
+            }}
+            
+            // Initial status
+            updateOnlineStatus();
+            
+            // Listen for status changes (non-blocking, no alerts/popups)
+            window.addEventListener('online', () => {{
+                updateOnlineStatus();
+                console.log('[Network Status] Connection restored - API calls will use network');
+            }});
+            
+            window.addEventListener('offline', () => {{
+                updateOnlineStatus();
+                console.log('[Network Status] Connection lost - App will serve cached content');
             }});
         </script>
     </body>

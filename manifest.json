@@ -1,7 +1,7 @@
 {
   "name": "SwiftSync - Lecture Management System",
   "short_name": "SwiftSync",
-  "description": "Student lecture management and synchronization system with Google Classroom integration",
+  "description": "Student lecture management system",
   "start_url": "/",
   "id": "/",
   "display": "standalone",
