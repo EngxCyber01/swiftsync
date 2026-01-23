@@ -1413,9 +1413,7 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                     <div class="logo-icon" style="width: 50px; height: 50px; border-radius: 12px; position: relative; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
                         <div style="position: absolute; top: 0; left: 0; right: 0; height: 33.33%; background: linear-gradient(180deg, #CE1126 0%, #DC143C 50%, #8B0000 100%);"></div>
                         <div style="position: absolute; top: 33.33%; left: 0; right: 0; height: 33.33%; background: linear-gradient(135deg, #FFFFFF 0%, #FAFAFA 30%, #F8F8F8 60%, #F0F0F0 100%); display: flex; align-items: center; justify-content: center;">
-                            <div style="width: 14px; height: 14px; background: radial-gradient(circle at 30% 30%, #FFFACD 0%, #FFD700 30%, #FFA500 60%, #FF8C00 100%); border-radius: 50%; box-shadow: 0 0 8px rgba(255, 215, 0, 1), 0 0 16px rgba(255, 165, 0, 0.8); position: relative;">
-                                <div style="content: ''; position: absolute; top: 50%; left: 50%; width: 35px; height: 35px; transform: translate(-50%, -50%); background: repeating-conic-gradient(from 0deg, transparent 0deg 8deg, rgba(255, 215, 0, 0.35) 8deg 16deg); border-radius: 50%;"></div>
-                            </div>
+                            <div style="width: 14px; height: 14px; background: radial-gradient(circle at 30% 30%, #FFFACD 0%, #FFD700 30%, #FFA500 60%, #FF8C00 100%); border-radius: 50%; box-shadow: 0 0 8px rgba(255, 215, 0, 1), 0 0 16px rgba(255, 165, 0, 0.8);"></div>
                         </div>
                         <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 33.33%; background: linear-gradient(180deg, #006600 0%, #228B22 50%, #32CD32 100%);"></div>
                     </div>
@@ -4559,31 +4557,13 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Fetch the file as blob
-                    const response = await fetch(url);
-                    if (!response.ok) throw new Error('Download failed');
-                    
-                    const blob = await response.blob();
-                    const blobUrl = URL.createObjectURL(blob);
-                    
-                    // Create and trigger download
-                    const a = document.createElement('a');
-                    a.href = blobUrl;
-                    a.download = filename;
-                    a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
-                    
-                    // Clean up after download starts
-                    setTimeout(() => {{
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(blobUrl);
-                    }}, 100);
+                    // Direct download using window location - no dialog
+                    window.location.href = url;
                     
                     // Show success notification
                     setTimeout(() => {{
-                        showNotification('✅ Download finished!', 'success');
-                    }}, 800);
+                        showNotification('✅ Download started!', 'success');
+                    }}, 300);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
