@@ -2176,19 +2176,91 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: 1.5rem 0;
+                padding: 1.5rem 2.5rem;
                 margin-bottom: 3rem;
-                background: rgba(22, 33, 62, 0.6);
-                backdrop-filter: blur(5px);
-                border-radius: 15px;
-                padding: 1.5rem 2rem;
-                border: 1px solid rgba(255, 215, 0, 0.15);
+                background: linear-gradient(135deg, rgba(10, 20, 40, 0.95) 0%, rgba(20, 30, 50, 0.9) 100%);
+                backdrop-filter: blur(20px);
+                border-radius: 18px;
+                border: 1px solid rgba(0, 217, 255, 0.2);
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3), 0 0 60px rgba(0, 217, 255, 0.1);
             }}
             
             .logo {{
                 display: flex;
                 align-items: center;
-                gap: 1rem;
+                gap: 1.2rem;
+            }}
+            
+            .kurdistan-map {{
+                transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            }}
+            
+            .kurdistan-map:hover {{
+                transform: scale(1.1) rotate(2deg);
+            }}
+            
+            .center-text {{
+                text-align: center;
+                text-shadow: 0 0 20px rgba(0, 217, 255, 0.4);
+            }}
+            
+            .year-badge-modern {{
+                padding: 0.6rem 1.4rem;
+                background: rgba(0, 217, 255, 0.08);
+                border: 1.5px solid rgba(0, 217, 255, 0.3);
+                border-radius: 50px;
+                color: #00d9ff;
+                font-weight: 700;
+                font-size: 0.9rem;
+                letter-spacing: 0.05em;
+                box-shadow: 0 4px 15px rgba(0, 217, 255, 0.15), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+                transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            }}
+            
+            .year-badge-modern:hover {{
+                background: rgba(0, 217, 255, 0.15);
+                border-color: rgba(0, 217, 255, 0.6);
+                box-shadow: 0 8px 25px rgba(0, 217, 255, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.2);
+                transform: translateY(-2px);
+            }}
+            
+            @keyframes mapFadeIn {{
+                0% {{
+                    opacity: 0;
+                    transform: scale(0.8);
+                    filter: blur(4px);
+                }}
+                100% {{
+                    opacity: 1;
+                    transform: scale(1);
+                    filter: blur(0);
+                }}
+            }}
+            
+            @keyframes slideInLeft {{
+                0% {{
+                    opacity: 0;
+                    transform: translateX(-30px);
+                    filter: blur(8px);
+                }}
+                100% {{
+                    opacity: 1;
+                    transform: translateX(0);
+                    filter: blur(0);
+                }}
+            }}
+            
+            @keyframes slideInRight {{
+                0% {{
+                    opacity: 0;
+                    transform: translateX(30px);
+                    filter: blur(8px);
+                }}
+                100% {{
+                    opacity: 1;
+                    transform: translateX(0);
+                    filter: blur(0);
+                }}
             }}
             
             .logo-icon {{
@@ -4117,32 +4189,50 @@ async def dashboard() -> HTMLResponse:
     </head>
     <body>
         <div class="container">
-            <!-- Navigation -->
+            <!-- Modern Navigation Header -->
             <nav class="nav">
-                <div class="logo">
-                    <div class="logo-icon">
-                        <div class="flag-center">
-                            <div class="sun"></div>
-                        </div>
+                <div class="logo" style="animation: slideInLeft 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;">
+                    <!-- Kurdistan Map Icon -->
+                    <div class="kurdistan-map" style="animation: mapFadeIn 1s ease-out both;">
+                        <svg viewBox="0 0 100 100" width="55" height="55" style="filter: drop-shadow(0 0 15px rgba(0, 217, 255, 0.5));">
+                            <!-- Kurdistan map outline with flag colors -->
+                            <path d="M20,30 Q30,25 40,30 L50,25 Q60,28 70,30 L75,35 Q78,42 75,50 L70,60 Q65,68 55,70 L45,72 Q35,70 25,65 L20,55 Q18,45 20,35 Z" 
+                                  fill="url(#kurdiGrad)" stroke="rgba(255,215,0,0.8)" stroke-width="1.5"/>
+                            <!-- Sun in center -->
+                            <circle cx="50" cy="50" r="8" fill="#FFD700" opacity="0.9"/>
+                            <defs>
+                                <linearGradient id="kurdiGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#DC143C;stop-opacity:1" />
+                                    <stop offset="33%" style="stop-color:#DC143C;stop-opacity:1" />
+                                    <stop offset="33%" style="stop-color:#FFFFFF;stop-opacity:1" />
+                                    <stop offset="50%" style="stop-color:#FFFFFF;stop-opacity:1" />
+                                    <stop offset="66%" style="stop-color:#FFFFFF;stop-opacity:1" />
+                                    <stop offset="66%" style="stop-color:#228B22;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#228B22;stop-opacity:1" />
+                                </linearGradient>
+                            </defs>
+                        </svg>
                     </div>
-                    <div class="logo-text">
-                        <h1>SwiftSync</h1>
-                        <p>SSCreative</p>
+                    <div class="logo-text" style="animation: slideInLeft 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;">
+                        <h1 style="font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; background: linear-gradient(135deg, #00d9ff 0%, #00a8cc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">SwiftSync</h1>
+                        <p style="font-size: 0.75rem; color: rgba(0, 217, 255, 0.7); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">SSCREATIVE</p>
                     </div>
                 </div>
                 
-                <!-- Kurdish Text Animation (in navbar) -->
-                <div class="kurdish-text" id="kurdishText"></div>
+                <!-- Center Text with Gradient -->
+                <div class="center-text" style="font-size: 1.1rem; font-weight: 600; background: linear-gradient(90deg, #00d9ff 0%, #0096ff 50%, #00d9ff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: fadeIn 1s ease 0.5s both;">
+                    Rojava Rojhilat e Kurdist
+                </div>
                 
-                <div class="nav-actions">
+                <div class="nav-actions" style="animation: slideInRight 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;">
                     <!-- PWA Install Button -->
                     <button class="install-btn" id="pwaInstallBtn">
                         <i class="fas fa-download"></i>
                         <span>Install App</span>
                     </button>
                     
-                    <div class="year-badge">
-                        <i class="fas fa-calendar-alt"></i> 2025-2026
+                    <div class="year-badge-modern">
+                        2025–2026
                     </div>
                 </div>
             </nav>
@@ -4586,7 +4676,7 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Generate unique download URL with timestamp to prevent 'download again' dialog
+                    // Generate unique download URL with timestamp
                     const timestamp = new Date().getTime();
                     const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{timestamp}}`;
                     
@@ -4612,11 +4702,10 @@ async def dashboard() -> HTMLResponse:
                     document.body.appendChild(a);
                     a.click();
                     
-                    // Cleanup
+                    // Cleanup silently - no notification until user completes download
                     setTimeout(() => {{
                         document.body.removeChild(a);
                         URL.revokeObjectURL(blobUrl);
-                        showNotification('✅ Download finished!', 'success');
                     }}, 100);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
