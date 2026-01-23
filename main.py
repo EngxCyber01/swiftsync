@@ -481,6 +481,30 @@ async def list_files() -> JSONResponse:
     return JSONResponse(files_by_subject)
 
 
+@app.get("/api/download/{filename}")
+async def download_file(filename: str):
+    """Download a file with proper Content-Disposition header to force download"""
+    from fastapi.responses import FileResponse
+    import urllib.parse
+    
+    file_path = DOWNLOAD_DIR / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # URL encode filename for proper header
+    encoded_filename = urllib.parse.quote(filename)
+    
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type='application/octet-stream',
+        headers={
+            'Content-Disposition': f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        }
+    )
+
+
 @app.post("/api/summarize")
 async def summarize_lecture(filename: str) -> JSONResponse:
     """
@@ -4557,8 +4581,9 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Direct download using window location - no dialog
-                    window.location.href = url;
+                    // Use download endpoint that forces download with Content-Disposition header
+                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}`;
+                    window.location.href = downloadUrl;
                     
                     // Show success notification
                     setTimeout(() => {{
