@@ -2915,6 +2915,7 @@ async def dashboard() -> HTMLResponse:
                 text-decoration: none !important;
                 display: inline-flex;
                 align-items: center;
+                justify-content: center;
                 gap: 0.5rem;
                 user-select: none;
                 white-space: nowrap;
@@ -4548,21 +4549,25 @@ async def dashboard() -> HTMLResponse:
             async function downloadFile(url, filename, event) {{
                 if (event) event.preventDefault();
                 try {{
-                    // Use hidden link to trigger download
+                    // Fetch the file to trigger download without browser prompt
+                    const response = await fetch(url);
+                    const blob = await response.blob();
+                    
+                    // Create object URL from blob
+                    const blobUrl = window.URL.createObjectURL(blob);
+                    
+                    // Create and click download link with unique timestamp
                     const a = document.createElement('a');
-                    a.href = url;
+                    a.href = blobUrl;
                     a.download = filename;
                     a.style.display = 'none';
                     document.body.appendChild(a);
                     a.click();
                     
-                    // Wait a moment before removing
+                    // Clean up
                     setTimeout(() => {{
                         document.body.removeChild(a);
-                    }}, 100);
-                    
-                    // Show success notification
-                    setTimeout(() => {{
+                        window.URL.revokeObjectURL(blobUrl);
                         showNotification('✅ Download finished!', 'success');
                     }}, 500);
                 }} catch (error) {{
@@ -4792,7 +4797,8 @@ async def dashboard() -> HTMLResponse:
                         date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
                         expires = "; expires=" + date.toUTCString();
                     }}
-                    document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=Lax";
+                    // Use SameSite=None with Secure for cross-platform support (Android/iPhone)
+                    document.cookie = name + "=" + (value || "") + expires + "; path=/; SameSite=None; Secure";
                 }},
                 // Helper: Get cookie
                 _getCookie: function(name) {{
