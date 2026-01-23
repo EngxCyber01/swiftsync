@@ -4593,38 +4593,19 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Generate unique download URL with timestamp to prevent 'download again' dialog
+                    // Generate unique download URL with timestamp AND random string to bypass Android detection
                     const timestamp = new Date().getTime();
-                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{timestamp}}`;
+                    const random = Math.random().toString(36).substring(2, 9);
+                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{timestamp}}${{random}}`;
                     
-                    // Fetch with strict no-cache policy
-                    const response = await fetch(downloadUrl, {{
-                        cache: 'no-store',
-                        headers: {{
-                            'Cache-Control': 'no-cache, no-store, must-revalidate',
-                            'Pragma': 'no-cache'
-                        }}
-                    }});
+                    // Direct navigation - let server headers handle the download
+                    // This bypasses Android's duplicate detection since we're not using blob URLs
+                    window.location.href = downloadUrl;
                     
-                    if (!response.ok) throw new Error('Download failed');
-                    
-                    const blob = await response.blob();
-                    const blobUrl = URL.createObjectURL(blob);
-                    
-                    // Create hidden link and trigger download
-                    const a = document.createElement('a');
-                    a.style.display = 'none';
-                    a.href = blobUrl;
-                    a.download = filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    
-                    // Cleanup
+                    // Show notification
                     setTimeout(() => {{
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(blobUrl);
-                        showNotification('✅ Download finished!', 'success');
-                    }}, 100);
+                        showNotification('✅ Download started!', 'success');
+                    }}, 500);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
