@@ -500,7 +500,10 @@ async def download_file(filename: str):
         filename=filename,
         media_type='application/octet-stream',
         headers={
-            'Content-Disposition': f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
+            'Content-Disposition': f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
         }
     )
 
@@ -4581,28 +4584,37 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Add unique timestamp to prevent "download again" dialog
-                    const timestamp = new Date().getTime();
-                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?t=${{timestamp}}`;
+                    // Add random parameter to force fresh download and bypass cache
+                    const randomId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+                    const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{randomId}}`;
                     
-                    // Create invisible iframe for silent download
-                    const iframe = document.createElement('iframe');
-                    iframe.style.display = 'none';
-                    iframe.style.position = 'fixed';
-                    iframe.style.top = '-9999px';
-                    document.body.appendChild(iframe);
+                    // Fetch with no-cache to prevent browser caching
+                    const response = await fetch(downloadUrl, {{
+                        cache: 'no-store',
+                        headers: {{
+                            'Cache-Control': 'no-cache'
+                        }}
+                    }});
                     
-                    // Set iframe source to trigger download
-                    iframe.src = downloadUrl;
+                    if (!response.ok) throw new Error('Download failed');
                     
-                    // Show notification immediately
-                    showNotification('⏬ Downloading...', 'info');
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
                     
-                    // Remove iframe and show success after download starts
+                    // Create hidden link and trigger download
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = blobUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    
+                    // Cleanup
                     setTimeout(() => {{
-                        document.body.removeChild(iframe);
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(blobUrl);
                         showNotification('✅ Download finished!', 'success');
-                    }}, 2000);
+                    }}, 100);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
                     console.error('Download error:', error);
