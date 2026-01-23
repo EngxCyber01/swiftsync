@@ -2176,90 +2176,48 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: 1.5rem 2.5rem;
+                padding: 1.5rem 0;
                 margin-bottom: 3rem;
-                background: linear-gradient(135deg, rgba(10, 20, 40, 0.95) 0%, rgba(20, 30, 50, 0.9) 100%);
-                backdrop-filter: blur(20px);
-                border-radius: 18px;
-                border: 1px solid rgba(0, 217, 255, 0.2);
-                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3), 0 0 60px rgba(0, 217, 255, 0.1);
+                background: rgba(22, 33, 62, 0.6);
+                backdrop-filter: blur(5px);
+                border-radius: 15px;
+                padding: 1.5rem 2rem;
+                border: 1px solid rgba(255, 215, 0, 0.15);
             }}
             
             .logo {{
                 display: flex;
                 align-items: center;
-                gap: 1.2rem;
+                gap: 1rem;
             }}
             
-            .kurdistan-map {{
-                transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            .kurdistan-map-logo {{
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                opacity: 0;
+                transform: scale(0.95);
+                animation: mapFadeIn 0.8s ease-out 0.2s forwards;
             }}
             
-            .kurdistan-map:hover {{
-                transform: scale(1.1) rotate(2deg);
+            .kurdistan-map-logo svg {{
+                filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.3)) drop-shadow(0 0 20px rgba(255, 215, 0, 0.15));
+                transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
             }}
             
-            .center-text {{
-                text-align: center;
-                text-shadow: 0 0 20px rgba(0, 217, 255, 0.4);
-            }}
-            
-            .year-badge-modern {{
-                padding: 0.6rem 1.4rem;
-                background: rgba(0, 217, 255, 0.08);
-                border: 1.5px solid rgba(0, 217, 255, 0.3);
-                border-radius: 50px;
-                color: #00d9ff;
-                font-weight: 700;
-                font-size: 0.9rem;
-                letter-spacing: 0.05em;
-                box-shadow: 0 4px 15px rgba(0, 217, 255, 0.15), inset 0 1px 2px rgba(255, 255, 255, 0.1);
-                transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-            }}
-            
-            .year-badge-modern:hover {{
-                background: rgba(0, 217, 255, 0.15);
-                border-color: rgba(0, 217, 255, 0.6);
-                box-shadow: 0 8px 25px rgba(0, 217, 255, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.2);
-                transform: translateY(-2px);
+            .kurdistan-map-logo:hover svg {{
+                transform: scale(1.05);
+                filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.4)) drop-shadow(0 0 30px rgba(255, 215, 0, 0.25));
             }}
             
             @keyframes mapFadeIn {{
                 0% {{
                     opacity: 0;
-                    transform: scale(0.8);
-                    filter: blur(4px);
+                    transform: scale(0.95);
                 }}
                 100% {{
                     opacity: 1;
                     transform: scale(1);
-                    filter: blur(0);
-                }}
-            }}
-            
-            @keyframes slideInLeft {{
-                0% {{
-                    opacity: 0;
-                    transform: translateX(-30px);
-                    filter: blur(8px);
-                }}
-                100% {{
-                    opacity: 1;
-                    transform: translateX(0);
-                    filter: blur(0);
-                }}
-            }}
-            
-            @keyframes slideInRight {{
-                0% {{
-                    opacity: 0;
-                    transform: translateX(30px);
-                    filter: blur(8px);
-                }}
-                100% {{
-                    opacity: 1;
-                    transform: translateX(0);
-                    filter: blur(0);
                 }}
             }}
             
@@ -4189,50 +4147,73 @@ async def dashboard() -> HTMLResponse:
     </head>
     <body>
         <div class="container">
-            <!-- Modern Navigation Header -->
+            <!-- Navigation -->
             <nav class="nav">
-                <div class="logo" style="animation: slideInLeft 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;">
-                    <!-- Kurdistan Map Icon -->
-                    <div class="kurdistan-map" style="animation: mapFadeIn 1s ease-out both;">
-                        <svg viewBox="0 0 100 100" width="55" height="55" style="filter: drop-shadow(0 0 15px rgba(0, 217, 255, 0.5));">
-                            <!-- Kurdistan map outline with flag colors -->
-                            <path d="M20,30 Q30,25 40,30 L50,25 Q60,28 70,30 L75,35 Q78,42 75,50 L70,60 Q65,68 55,70 L45,72 Q35,70 25,65 L20,55 Q18,45 20,35 Z" 
-                                  fill="url(#kurdiGrad)" stroke="rgba(255,215,0,0.8)" stroke-width="1.5"/>
-                            <!-- Sun in center -->
-                            <circle cx="50" cy="50" r="8" fill="#FFD700" opacity="0.9"/>
+                <div class="logo">
+                    <div class="kurdistan-map-logo">
+                        <svg viewBox="0 0 100 120" width="48" height="55" xmlns="http://www.w3.org/2000/svg">
                             <defs>
-                                <linearGradient id="kurdiGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#DC143C;stop-opacity:1" />
-                                    <stop offset="33%" style="stop-color:#DC143C;stop-opacity:1" />
-                                    <stop offset="33%" style="stop-color:#FFFFFF;stop-opacity:1" />
-                                    <stop offset="50%" style="stop-color:#FFFFFF;stop-opacity:1" />
-                                    <stop offset="66%" style="stop-color:#FFFFFF;stop-opacity:1" />
-                                    <stop offset="66%" style="stop-color:#228B22;stop-opacity:1" />
-                                    <stop offset="100%" style="stop-color:#228B22;stop-opacity:1" />
+                                <!-- 3D Embossed Lighting -->
+                                <filter id="emboss" x="-50%" y="-50%" width="200%" height="200%">
+                                    <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="blur"/>
+                                    <feSpecularLighting in="blur" surfaceScale="5" specularConstant="0.8" specularExponent="20" lighting-color="#ffffff" result="light">
+                                        <fePointLight x="-20" y="-30" z="100"/>
+                                    </feSpecularLighting>
+                                    <feComposite in="light" in2="SourceAlpha" operator="in" result="highlight"/>
+                                    <feComposite in="SourceGraphic" in2="highlight" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>
+                                </filter>
+                                <linearGradient id="redGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#E63946;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#B71C1C;stop-opacity:1" />
+                                </linearGradient>
+                                <linearGradient id="whiteGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#FFFFFF;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#E8E8E8;stop-opacity:1" />
+                                </linearGradient>
+                                <linearGradient id="greenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#2E7D32;stop-opacity:1" />
+                                    <stop offset="100%" style="stop-color:#1B5E20;stop-opacity:1" />
                                 </linearGradient>
                             </defs>
+                            <!-- Kurdistan Map Shape with Flag Colors -->
+                            <g filter="url(#emboss)">
+                                <!-- Top Red Section -->
+                                <path d="M25,25 Q35,20 45,22 L55,20 Q65,22 72,28 L75,35 L20,35 Q22,30 25,25 Z" 
+                                      fill="url(#redGrad)" stroke="rgba(0,0,0,0.2)" stroke-width="0.5"/>
+                                <!-- Middle White Section with Sun -->
+                                <path d="M20,35 L75,35 L75,65 L20,65 Z" 
+                                      fill="url(#whiteGrad)" stroke="rgba(0,0,0,0.1)" stroke-width="0.3"/>
+                                <!-- Golden Sun in Center -->
+                                <circle cx="47.5" cy="50" r="9" fill="#FFD700" opacity="0.95"/>
+                                <circle cx="47.5" cy="50" r="6" fill="#FFA500" opacity="0.7"/>
+                                <!-- Bottom Green Section -->
+                                <path d="M20,65 L75,65 Q70,72 60,78 L50,82 Q40,80 30,75 L22,68 Q20,66 20,65 Z" 
+                                      fill="url(#greenGrad)" stroke="rgba(0,0,0,0.2)" stroke-width="0.5"/>
+                            </g>
+                            <!-- Subtle Highlights for 3D Effect -->
+                            <path d="M25,25 Q35,20 45,22 L55,20 Q65,22 72,28" 
+                                  fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1" opacity="0.6"/>
+                            <ellipse cx="47.5" cy="48" rx="3" ry="2" fill="rgba(255,255,255,0.5)" opacity="0.4"/>
                         </svg>
                     </div>
-                    <div class="logo-text" style="animation: slideInLeft 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;">
-                        <h1 style="font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em; background: linear-gradient(135deg, #00d9ff 0%, #00a8cc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">SwiftSync</h1>
-                        <p style="font-size: 0.75rem; color: rgba(0, 217, 255, 0.7); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;">SSCREATIVE</p>
+                    <div class="logo-text">
+                        <h1>SwiftSync</h1>
+                        <p>SSCreative</p>
                     </div>
                 </div>
                 
-                <!-- Center Text with Gradient -->
-                <div class="center-text" style="font-size: 1.1rem; font-weight: 600; background: linear-gradient(90deg, #00d9ff 0%, #0096ff 50%, #00d9ff 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: fadeIn 1s ease 0.5s both;">
-                    Rojava Rojhilat e Kurdist
-                </div>
+                <!-- Kurdish Text Animation (in navbar) -->
+                <div class="kurdish-text" id="kurdishText"></div>
                 
-                <div class="nav-actions" style="animation: slideInRight 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;">
+                <div class="nav-actions">
                     <!-- PWA Install Button -->
                     <button class="install-btn" id="pwaInstallBtn">
                         <i class="fas fa-download"></i>
                         <span>Install App</span>
                     </button>
                     
-                    <div class="year-badge-modern">
-                        2025–2026
+                    <div class="year-badge">
+                        <i class="fas fa-calendar-alt"></i> 2025-2026
                     </div>
                 </div>
             </nav>
@@ -4676,7 +4657,7 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 try {{
-                    // Generate unique download URL with timestamp
+                    // Generate unique download URL with timestamp to prevent 'download again' dialog
                     const timestamp = new Date().getTime();
                     const downloadUrl = `/api/download/${{encodeURIComponent(filename)}}?_=${{timestamp}}`;
                     
@@ -4702,10 +4683,11 @@ async def dashboard() -> HTMLResponse:
                     document.body.appendChild(a);
                     a.click();
                     
-                    // Cleanup silently - no notification until user completes download
+                    // Cleanup
                     setTimeout(() => {{
                         document.body.removeChild(a);
                         URL.revokeObjectURL(blobUrl);
+                        showNotification('✅ Download finished!', 'success');
                     }}, 100);
                 }} catch (error) {{
                     showNotification('❌ Download failed!', 'error');
