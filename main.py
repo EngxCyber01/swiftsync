@@ -2045,10 +2045,14 @@ async def dashboard() -> HTMLResponse:
             button:focus, button:active,
             .download-btn:focus, .download-btn:active,
             .sync-btn:focus, .sync-btn:active,
+            .summary-btn:focus, .summary-btn:active,
             .subject-header:focus, .subject-header:active,
-            .file-item:focus, .file-item:active {{
+            .file-item:focus, .file-item:active,
+            a:focus, a:active {{
                 outline: none !important;
                 box-shadow: none !important;
+                border: none !important;
+                -webkit-tap-highlight-color: transparent !important;
             }}
             
             /* Make ALL buttons ultra-responsive */
@@ -2166,9 +2170,9 @@ async def dashboard() -> HTMLResponse:
                 align-items: center;
                 justify-content: center;
                 font-size: 1.5rem;
-                box-shadow: 0 0 30px rgba(255, 200, 0, 0.4);
+                box-shadow: 0 0 30px rgba(255, 200, 0, 0.5), 0 0 15px rgba(220, 20, 60, 0.3);
                 animation: glow 3s ease-in-out infinite;
-                border: 2px solid rgba(255, 255, 255, 0.1);
+                border: 2px solid rgba(255, 255, 255, 0.15);
                 overflow: hidden;
                 position: relative;
             }}
@@ -2180,7 +2184,8 @@ async def dashboard() -> HTMLResponse:
                 left: 0;
                 right: 0;
                 height: 33.33%;
-                background: linear-gradient(180deg, #DC143C 0%, #C41230 100%);
+                background: linear-gradient(180deg, #DC143C 0%, #B71C1C 50%, #C41230 100%);
+                box-shadow: inset 0 -2px 8px rgba(0, 0, 0, 0.2);
             }}
             
             .logo-icon::after {{
@@ -2190,7 +2195,8 @@ async def dashboard() -> HTMLResponse:
                 left: 0;
                 right: 0;
                 height: 33.33%;
-                background: linear-gradient(180deg, #1B7A1B 0%, #228B22 100%);
+                background: linear-gradient(180deg, #1B7A1B 0%, #2E7D32 50%, #228B22 100%);
+                box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
             }}
             
             .logo-icon .flag-center {{
@@ -2199,25 +2205,44 @@ async def dashboard() -> HTMLResponse:
                 left: 0;
                 right: 0;
                 height: 33.34%;
-                background: linear-gradient(90deg, #FFFFFF 0%, #F8F8F8 100%);
+                background: linear-gradient(135deg, #FFFFFF 0%, #FAFAFA 50%, #F5F5F5 100%);
                 display: flex;
                 align-items: center;
                 justify-content: center;
+                box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
             }}
             
             .logo-icon .sun {{
-                width: 16px;
-                height: 16px;
-                background: radial-gradient(circle, #FFD700 0%, #FFA500 100%);
+                width: 18px;
+                height: 18px;
+                background: radial-gradient(circle at 35% 35%, #FFE57F 0%, #FFD700 40%, #FFA500 100%);
                 border-radius: 50%;
                 position: relative;
                 animation: sunGlow 3s ease-in-out infinite;
-                box-shadow: 0 0 8px rgba(255, 215, 0, 0.6);
+                box-shadow: 0 0 10px rgba(255, 215, 0, 0.8), 0 0 20px rgba(255, 165, 0, 0.4);
+            }}
+            
+            .logo-icon .sun::before {{
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                width: 26px;
+                height: 26px;
+                transform: translate(-50%, -50%);
+                background: radial-gradient(circle, rgba(255, 215, 0, 0.3) 0%, transparent 70%);
+                border-radius: 50%;
+                animation: sunRays 4s linear infinite;
+            }}
+            
+            @keyframes sunRays {{
+                0%, 100% {{ transform: translate(-50%, -50%) rotate(0deg) scale(1); opacity: 0.6; }}
+                50% {{ transform: translate(-50%, -50%) rotate(180deg) scale(1.1); opacity: 0.8; }}
             }}
             
             @keyframes sunGlow {{
-                0%, 100% {{ box-shadow: 0 0 8px rgba(255, 215, 0, 0.6); }}
-                50% {{ box-shadow: 0 0 16px rgba(255, 215, 0, 0.9); }}
+                0%, 100% {{ box-shadow: 0 0 10px rgba(255, 215, 0, 0.8), 0 0 20px rgba(255, 165, 0, 0.4); }}
+                50% {{ box-shadow: 0 0 15px rgba(255, 215, 0, 1), 0 0 30px rgba(255, 165, 0, 0.6), 0 0 40px rgba(255, 140, 0, 0.3); }}
             }}
             
             @keyframes glow {{
@@ -2604,11 +2629,24 @@ async def dashboard() -> HTMLResponse:
                 border-radius: 20px;
                 margin-bottom: 1.5rem;
                 overflow: hidden;
-                transition: all 0.3s;
+                transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+            }}
+            
+            .subject-section::before {{
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 3px;
+                background: linear-gradient(90deg, var(--accent), var(--success));
             }}
             
             .subject-section:hover {{
                 border-color: var(--accent);
+                transform: translateY(-2px);
+                box-shadow: 0 10px 40px rgba(0, 217, 255, 0.15);
             }}
             
             .subject-header {{
@@ -2621,10 +2659,17 @@ async def dashboard() -> HTMLResponse:
                 align-items: center;
                 transition: all 0.3s;
                 user-select: none;
+                border: none;
+                outline: none;
             }}
             
             .subject-header:hover {{
                 background: linear-gradient(135deg, rgba(0, 217, 255, 0.15), rgba(0, 255, 136, 0.1));
+            }}
+            
+            .subject-header:focus, .subject-header:active {{
+                outline: none !important;
+                border: none !important;
             }}
             
             .subject-title {{
@@ -2684,12 +2729,30 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 align-items: center;
                 gap: 1.5rem;
-                padding: 1.25rem;
-                background: var(--bg-tertiary);
+                padding: 1.5rem;
+                background: linear-gradient(135deg, var(--bg-tertiary) 0%, rgba(26, 26, 26, 0.8) 100%);
                 border: 1px solid var(--border);
-                border-radius: 15px;
+                border-radius: 16px;
                 margin-bottom: 1rem;
-                transition: all 0.3s;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                position: relative;
+                overflow: hidden;
+            }}
+            
+            .file-item::before {{
+                content: '';
+                position: absolute;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                width: 3px;
+                background: linear-gradient(180deg, var(--accent), var(--success));
+                opacity: 0;
+                transition: opacity 0.3s;
+            }}
+            
+            .file-item:hover::before {{
+                opacity: 1;
             }}
             
             .file-item:last-child {{
@@ -2697,38 +2760,61 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .file-item:hover {{
-                background: var(--bg-secondary);
+                background: linear-gradient(135deg, rgba(26, 26, 26, 0.9) 0%, var(--bg-secondary) 100%);
                 border-color: var(--accent);
                 transform: translateX(8px);
-                box-shadow: -5px 0 20px rgba(0, 217, 255, 0.2);
+                box-shadow: -5px 0 25px rgba(0, 217, 255, 0.25), 0 5px 20px rgba(0, 0, 0, 0.3);
             }}
             
             .file-icon {{
-                width: 55px;
-                height: 55px;
+                width: 58px;
+                height: 58px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                border-radius: 12px;
-                font-size: 1.5rem;
+                border-radius: 14px;
+                font-size: 1.6rem;
                 flex-shrink: 0;
+                transition: all 0.3s;
+                position: relative;
+            }}
+            
+            .file-icon::after {{
+                content: '';
+                position: absolute;
+                inset: 0;
+                border-radius: 14px;
+                padding: 2px;
+                background: linear-gradient(135deg, currentColor, transparent);
+                -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+                -webkit-mask-composite: xor;
+                mask-composite: exclude;
+                opacity: 0.3;
+            }}
+            
+            .file-item:hover .file-icon {{
+                transform: scale(1.05) rotate(-3deg);
             }}
             
             .file-icon.pdf {{ 
-                background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.1));
+                background: linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(220, 38, 38, 0.15));
                 color: #ef4444;
+                box-shadow: 0 4px 15px rgba(239, 68, 68, 0.2);
             }}
             .file-icon.doc {{ 
-                background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(37, 99, 235, 0.1));
+                background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(37, 99, 235, 0.15));
                 color: #3b82f6;
+                box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2);
             }}
             .file-icon.ppt {{ 
-                background: linear-gradient(135deg, rgba(249, 115, 22, 0.2), rgba(234, 88, 12, 0.1));
+                background: linear-gradient(135deg, rgba(249, 115, 22, 0.25), rgba(234, 88, 12, 0.15));
                 color: #f97316;
+                box-shadow: 0 4px 15px rgba(249, 115, 22, 0.2);
             }}
             .file-icon.default {{ 
                 background: var(--glass);
                 color: var(--text-secondary);
+                box-shadow: 0 4px 15px rgba(255, 255, 255, 0.05);
             }}
             
             .file-info {{
@@ -2739,19 +2825,25 @@ async def dashboard() -> HTMLResponse:
             .file-name {{
                 font-weight: 600;
                 color: var(--text-primary);
-                margin-bottom: 0.5rem;
-                font-size: 0.95rem;
-                line-height: 1.4;
+                margin-bottom: 0.6rem;
+                font-size: 1rem;
+                line-height: 1.5;
                 user-select: text;
                 cursor: text;
+                letter-spacing: -0.01em;
             }}
             
             .file-meta {{
                 color: var(--text-tertiary);
-                font-size: 0.8rem;
+                font-size: 0.85rem;
                 display: flex;
                 align-items: center;
                 gap: 1rem;
+            }}
+            
+            .file-meta i {{
+                color: var(--accent);
+                font-size: 0.9rem;
             }}
             
             .file-size {{
@@ -2766,65 +2858,116 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .download-btn {{
-                padding: 0.75rem 1.5rem;
-                background: linear-gradient(135deg, var(--accent), var(--success));
-                color: var(--bg-primary);
+                padding: 0.85rem 1.75rem;
+                background: linear-gradient(135deg, var(--accent) 0%, var(--success) 100%);
+                color: #000000;
                 border: none;
-                border-radius: 10px;
+                border-radius: 12px;
                 cursor: pointer;
                 font-weight: 700;
-                font-size: 0.85rem;
-                transition: all 0.1s ease-out;  /* ULTRA FAST */
+                font-size: 0.9rem;
+                transition: all 0.1s ease-out;
                 text-decoration: none;
                 display: flex;
                 align-items: center;
-                gap: 0.5rem;
+                gap: 0.6rem;
                 user-select: none;
                 white-space: nowrap;
-                touch-action: manipulation;  /* No mobile tap delay */
-                will-change: transform, box-shadow;  /* GPU acceleration */
+                touch-action: manipulation;
+                will-change: transform, box-shadow;
+                position: relative;
+                overflow: hidden;
+                box-shadow: 0 4px 15px rgba(0, 217, 255, 0.3);
+            }}
+            
+            .download-btn::before {{
+                content: '';
+                position: absolute;
+                top: 0;
+                left: -100%;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+                transition: left 0.5s;
+            }}
+            
+            .download-btn:hover::before {{
+                left: 100%;
             }}
             
             .download-btn:hover {{
-                transform: translateY(-2px) scale(1.02);
-                box-shadow: 0 8px 25px var(--accent-glow);
+                transform: translateY(-3px) scale(1.03);
+                box-shadow: 0 8px 30px rgba(0, 217, 255, 0.5), 0 0 20px rgba(0, 255, 136, 0.3);
             }}
             
             .download-btn:active {{
-                transform: translateY(0) scale(0.98);  /* INSTANT press feedback */
+                transform: translateY(0) scale(0.98);
                 transition: all 0.05s ease-out;
+                outline: none !important;
+                border: none !important;
+            }}
+            
+            .download-btn:focus {{
+                outline: none !important;
+                border: none !important;
+                box-shadow: 0 4px 15px rgba(0, 217, 255, 0.3);
             }}
             
             /* AI Summary Button */
             .summary-btn {{
-                padding: 0.75rem 1.5rem;
+                padding: 0.85rem 1.75rem;
                 background: linear-gradient(135deg, var(--kurdish-red) 0%, #ff6b6b 100%);
                 color: white;
                 border: none;
-                border-radius: 10px;
+                border-radius: 12px;
                 cursor: pointer;
                 font-weight: 700;
-                font-size: 0.85rem;
-                transition: all 0.1s ease-out;  /* ULTRA FAST */
+                font-size: 0.9rem;
+                transition: all 0.1s ease-out;
                 display: flex;
                 align-items: center;
-                gap: 0.5rem;
+                gap: 0.6rem;
                 user-select: none;
                 white-space: nowrap;
-                box-shadow: 0 4px 12px rgba(220, 20, 60, 0.3);
+                box-shadow: 0 4px 15px rgba(220, 20, 60, 0.3);
                 touch-action: manipulation;
                 will-change: transform, box-shadow;
+                position: relative;
+                overflow: hidden;
+            }}
+            
+            .summary-btn::before {{
+                content: '';
+                position: absolute;
+                top: 0;
+                left: -100%;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+                transition: left 0.5s;
+            }}
+            
+            .summary-btn:hover::before {{
+                left: 100%;
             }}
             
             .summary-btn:hover {{
-                transform: translateY(-2px) scale(1.02);
-                box-shadow: 0 8px 25px rgba(220, 20, 60, 0.5);
+                transform: translateY(-3px) scale(1.03);
+                box-shadow: 0 8px 30px rgba(220, 20, 60, 0.5), 0 0 20px rgba(255, 107, 107, 0.3);
                 background: linear-gradient(135deg, #ff1744 0%, #ff4757 100%);
             }}
             
             .summary-btn:active {{
-                transform: translateY(0) scale(0.98);  /* INSTANT feedback */
+                transform: translateY(0) scale(0.98);
                 transition: all 0.05s ease-out;
+                outline: none !important;
+                border: none !important;
+            }}
+            
+            .summary-btn:focus {{
+                outline: none !important;
+                border: none !important;
+                box-shadow: 0 4px 15px rgba(220, 20, 60, 0.3);
             }}
             
             .summary-btn:disabled {{
