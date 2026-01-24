@@ -1,7 +1,7 @@
 {
-  "name": "SwiftSync - Lecture Management System",
+  "name": "SwiftSync - Lecture Management",
   "short_name": "SwiftSync",
-  "description": "Student lecture management system",
+  "description": "Student lecture management by SSCreative",
   "start_url": "/",
   "id": "/",
   "display": "standalone",

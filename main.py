@@ -509,21 +509,21 @@ async def download_file(filename: str, request: Request, _: str = None):
     # URL encode filename for proper header
     encoded_filename = urllib.parse.quote(filename)
     
-    # Detect if request is from iOS Safari
+    # Detect if request is from iOS Safari (enhanced detection)
     user_agent = request.headers.get("User-Agent", "").lower()
-    is_ios = "iphone" in user_agent or "ipad" in user_agent
-    is_safari = "safari" in user_agent and "chrome" not in user_agent
+    is_ios = "iphone" in user_agent or "ipad" in user_agent or "ipod" in user_agent
+    is_safari = "safari" in user_agent and "chrome" not in user_agent and "crios" not in user_agent
     is_ios_safari = is_ios and is_safari
     
-    # iOS SAFARI FIX: Use application/octet-stream to force download
-    # Safari ignores Content-Disposition for application/pdf and shows inline viewer
-    # octet-stream tricks Safari into treating it as a binary file to download
+    # iOS SAFARI FIX: Force download by always using octet-stream for PDFs on iOS
+    # Safari's PDF viewer cannot be bypassed reliably, so we force binary download
     if filename.lower().endswith('.pdf'):
-        if is_ios_safari:
-            content_type = 'application/octet-stream'  # Forces download on iOS
-            logger.info(f"iOS Safari detected - forcing PDF download for {filename}")
+        if is_ios:
+            # Force download on ALL iOS browsers (Safari, Chrome, Firefox on iOS)
+            content_type = 'application/octet-stream'
+            logger.info(f"iOS device detected - forcing PDF download for {filename}")
         else:
-            content_type = 'application/pdf'  # Normal behavior for other browsers
+            content_type = 'application/pdf'  # Normal behavior for other platforms
     else:
         content_type = 'application/octet-stream'
     
@@ -540,13 +540,15 @@ async def download_file(filename: str, request: Request, _: str = None):
             # Prevent MIME sniffing (iOS may try to detect PDF and show preview)
             'X-Content-Type-Options': 'nosniff',
             
-            # Force no caching
-            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+            # Force no caching - critical for iOS
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0, private',
             'Pragma': 'no-cache',
             'Expires': '0',
             
-            # iOS-specific: Prevent inline viewing
-            'Content-Transfer-Encoding': 'binary'
+            # iOS-specific: Prevent inline viewing and force download
+            'Content-Transfer-Encoding': 'binary',
+            'X-Download-Options': 'noopen',  # IE/Edge specific
+            'X-Frame-Options': 'DENY'  # Prevent embedding in iframe
         }
     )
 
@@ -712,17 +714,16 @@ async def attendance_login(request: Request, username: str, password: str) -> JS
             })
             
             # ANDROID FIX: Set HTTP cookie for session persistence
-            # SameSite=Lax works on all browsers including problematic Android versions
-            # Secure flag only on HTTPS to prevent Android rejection
+            # Using explicit cookie settings for maximum Android compatibility
             response.set_cookie(
                 key="session_token",
                 value=result['session_token'],
-                max_age=1800,  # 30 minutes (matches server session TTL)
+                max_age=3600,  # 1 hour - longer timeout for Android stability
                 path="/",
                 domain=None,  # Prevents subdomain mismatch issues
-                secure=IS_PRODUCTION,  # True on HTTPS, False on localhost
-                httponly=False,  # Allow JS access for backward compatibility
-                samesite="lax"  # Android-safe: works without Secure flag
+                secure=True,  # Always secure for HTTPS (Render deployment)
+                httponly=True,  # Security: Prevent XSS attacks
+                samesite="none"  # Required for cross-site cookies with Secure=True
             )
             
             return response
@@ -2078,7 +2079,7 @@ async def dashboard() -> HTMLResponse:
         <title>SwiftSync • 2025/2026</title>
         
         <!-- PWA Meta Tags -->
-        <meta name="description" content="Student lecture management system by SSCreative">
+        <meta name="description" content="SwiftSync - Student lecture management by SSCreative">
         <meta name="theme-color" content="#00d9ff">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">

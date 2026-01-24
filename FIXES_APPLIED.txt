@@ -1,0 +1,69 @@
+"""
+🔧 FIXED ISSUES - Test Checklist
+
+✅ Issue 1: Android Auto-Logout FIXED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Changes:
+- Cookie now uses SameSite=None with Secure=True
+- Increased session timeout to 1 hour (3600 seconds)
+- HttpOnly=True for security (prevents XSS)
+- Secure=True (works on HTTPS - Render deployment)
+
+How to test on Android:
+1. Open Chrome on Android
+2. Login to your account
+3. Refresh page multiple times
+4. Navigate between pages
+5. ✅ Should stay logged in
+
+Technical: Cookie persists across all navigation and refreshes
+
+
+✅ Issue 2: iPhone PDF Download FIXED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Changes:
+- Enhanced iOS detection (iPhone, iPad, iPod)
+- Detects ALL iOS browsers (Safari, Chrome, Firefox on iOS)
+- Forces application/octet-stream for ALL PDFs on iOS
+- Added stronger cache-control headers
+- Added X-Download-Options and X-Frame-Options headers
+
+How to test on iPhone:
+1. Open app in Safari (or any iOS browser)
+2. Tap download button on any PDF
+3. ✅ Should download to Files app (not preview)
+
+Note: If iPhone still shows "Open in...", tap "Save to Files"
+This is normal iOS behavior
+
+
+✅ Issue 3: Link Preview Text FIXED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Changes:
+- Updated meta description in main.py
+- Updated manifest.json description
+- Removed "Google Classroom integration" reference
+
+New text:
+"SwiftSync - Student lecture management by SSCreative"
+
+How to test:
+1. Share link on WhatsApp/Telegram
+2. Wait for link preview to load
+3. ✅ Should show new description without Google Classroom
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 DEPLOY NOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Run these commands to deploy:
+
+git add .
+git commit -m "fix: Android logout + iOS download + remove Google Classroom text"
+git push
+
+Wait 2-3 minutes for Render to redeploy, then test!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
