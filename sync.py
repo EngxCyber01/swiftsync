@@ -33,6 +33,31 @@ def _ensure_dirs() -> None:
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _get_semester_from_subject(subject: str) -> str:
+    """Determine semester based on subject name"""
+    fall_subjects = [
+        'Combinatorics and Graph Theory',
+        'Database Principles',
+        'Data Structures and Algorithms',
+        'Mathematics III',
+        'Software Engineering Principles',
+        'Introduction to OOP'
+    ]
+    
+    spring_subjects = [
+        'Numerical Analysis and Probability',
+        'Data Communication',
+        'Object Oriented Programming'
+    ]
+    
+    if subject in fall_subjects:
+        return 'Fall Semester'
+    elif subject in spring_subjects:
+        return 'Spring Semester'
+    else:
+        return 'Fall Semester'  # Default to Fall
+
+
 def _init_db() -> None:
     _ensure_dirs()
     with sqlite3.connect(DB_PATH) as conn:
@@ -44,7 +69,8 @@ def _init_db() -> None:
                 upload_date TEXT,
                 subject TEXT,
                 filename TEXT,
-                last_notified TEXT
+                last_notified TEXT,
+                semester TEXT
             )
             """
         )
@@ -53,6 +79,13 @@ def _init_db() -> None:
             conn.execute("ALTER TABLE synced_items ADD COLUMN last_notified TEXT")
         except sqlite3.OperationalError:
             pass  # Column already exists
+        
+        # Add semester column if it doesn't exist (migration)
+        try:
+            conn.execute("ALTER TABLE synced_items ADD COLUMN semester TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        
         conn.commit()
 
 
@@ -68,10 +101,11 @@ def _seen(item_id: str) -> bool:
 
 
 def _mark_seen(item_id: str, subject: str = None, filename: str = None, upload_date: str = None) -> None:
+    semester = _get_semester_from_subject(subject) if subject else 'Fall Semester'
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO synced_items (id, subject, filename, upload_date) VALUES (?, ?, ?, ?)", 
-            (item_id, subject, filename, upload_date)
+            "INSERT OR IGNORE INTO synced_items (id, subject, filename, upload_date, semester) VALUES (?, ?, ?, ?, ?)", 
+            (item_id, subject, filename, upload_date, semester)
         )
         conn.commit()
 
