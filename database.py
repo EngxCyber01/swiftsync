@@ -41,6 +41,18 @@ def init_security_tables():
             )
         """)
         
+        # Create threat_logs table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS threat_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip_address TEXT NOT NULL,
+                threat_type TEXT NOT NULL,
+                details TEXT,
+                detected_at TEXT NOT NULL,
+                action_taken TEXT
+            )
+        """)
+        
         # Create index for faster IP lookups
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_blacklist_ip 
