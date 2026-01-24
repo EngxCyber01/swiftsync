@@ -482,8 +482,18 @@ async def list_files() -> JSONResponse:
 
 
 @app.get("/api/download/{filename}")
-async def download_file(filename: str, _: str = None):
-    """Download a file with forced attachment headers - prevents preview and caching"""
+async def download_file(filename: str, request: Request, _: str = None):
+    """
+    Download a file with forced attachment headers - prevents preview and caching
+    
+    iOS Safari Fix: Forces download instead of preview
+    - Uses application/octet-stream for PDFs to prevent Safari's inline viewer
+    - Adds X-Content-Type-Options to prevent MIME sniffing
+    - Multiple Content-Disposition formats for maximum compatibility
+    
+    Note: Safari may still open PDFs if user taps "Open in..." after download
+    This is iOS behavior and cannot be prevented server-side.
+    """
     from fastapi.responses import FileResponse
     import urllib.parse
     import os
@@ -499,20 +509,44 @@ async def download_file(filename: str, _: str = None):
     # URL encode filename for proper header
     encoded_filename = urllib.parse.quote(filename)
     
-    # Detect content type - use application/pdf for PDFs
-    content_type = 'application/pdf' if filename.lower().endswith('.pdf') else 'application/octet-stream'
+    # Detect if request is from iOS Safari
+    user_agent = request.headers.get("User-Agent", "").lower()
+    is_ios = "iphone" in user_agent or "ipad" in user_agent
+    is_safari = "safari" in user_agent and "chrome" not in user_agent
+    is_ios_safari = is_ios and is_safari
+    
+    # iOS SAFARI FIX: Use application/octet-stream to force download
+    # Safari ignores Content-Disposition for application/pdf and shows inline viewer
+    # octet-stream tricks Safari into treating it as a binary file to download
+    if filename.lower().endswith('.pdf'):
+        if is_ios_safari:
+            content_type = 'application/octet-stream'  # Forces download on iOS
+            logger.info(f"iOS Safari detected - forcing PDF download for {filename}")
+        else:
+            content_type = 'application/pdf'  # Normal behavior for other browsers
+    else:
+        content_type = 'application/octet-stream'
     
     return FileResponse(
         path=file_path,
         filename=filename,
         media_type=content_type,
         headers={
+            # Multiple Content-Disposition formats for maximum compatibility
             'Content-Disposition': f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}',
             'Content-Type': content_type,
             'Content-Length': str(file_size),
+            
+            # Prevent MIME sniffing (iOS may try to detect PDF and show preview)
+            'X-Content-Type-Options': 'nosniff',
+            
+            # Force no caching
             'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
             'Pragma': 'no-cache',
-            'Expires': '0'
+            'Expires': '0',
+            
+            # iOS-specific: Prevent inline viewing
+            'Content-Transfer-Encoding': 'binary'
         }
     )
 
@@ -637,6 +671,11 @@ async def attendance_login(request: Request, username: str, password: str) -> JS
     """
     Authenticate user for attendance access
     Creates a secure session token
+    
+    Android Fix: Sets HTTP cookie with SameSite=Lax (Android-safe)
+    - SameSite=None requires Secure flag and breaks on some Android browsers
+    - SameSite=Lax works across all browsers while maintaining security
+    - Cookie persists across page refreshes and browser restarts
     """
     try:
         # Get real client IP
@@ -664,12 +703,29 @@ async def attendance_login(request: Request, username: str, password: str) -> JS
             )
             logger.info(f"✅ Attendance login successful: {student_display} from IP {client_ip}")
             
-            return JSONResponse({
+            # Create response with session data
+            response = JSONResponse({
                 "success": True,
                 "session_token": result['session_token'],
                 "student_id": result['student_id'],
                 "username": result['username']
             })
+            
+            # ANDROID FIX: Set HTTP cookie for session persistence
+            # SameSite=Lax works on all browsers including problematic Android versions
+            # Secure flag only on HTTPS to prevent Android rejection
+            response.set_cookie(
+                key="session_token",
+                value=result['session_token'],
+                max_age=1800,  # 30 minutes (matches server session TTL)
+                path="/",
+                domain=None,  # Prevents subdomain mismatch issues
+                secure=IS_PRODUCTION,  # True on HTTPS, False on localhost
+                httponly=False,  # Allow JS access for backward compatibility
+                samesite="lax"  # Android-safe: works without Secure flag
+            )
+            
+            return response
         else:
             error_msg = result.get('error', 'Authentication failed')
             # Log failed login attempt
@@ -695,12 +751,26 @@ async def attendance_login(request: Request, username: str, password: str) -> JS
 
 
 @app.get("/api/attendance/data")
-async def get_attendance(request: Request, session_token: str) -> JSONResponse:
+async def get_attendance(request: Request, session_token: str = None) -> JSONResponse:
     """
     Fetch attendance data for authenticated user
     Requires valid session token from login
+    
+    Android Fix: Accepts session_token from query param OR cookie
     """
     try:
+        # ANDROID FIX: Try cookie if query param is missing
+        if not session_token:
+            session_token = request.cookies.get("session_token")
+            if session_token:
+                logger.info("Using session token from cookie (Android fallback)")
+        
+        if not session_token:
+            return JSONResponse({
+                "success": False,
+                "error": "Session token required"
+            }, status_code=401)
+        
         client_ip = get_real_client_ip(request)
         logger.info("Fetching attendance for session token: %s from IP: %s", session_token[:20], client_ip)
         result = await attendance_service.get_attendance(session_token)
@@ -727,11 +797,23 @@ async def get_attendance(request: Request, session_token: str) -> JSONResponse:
 
 
 @app.get("/api/attendance/profile")
-async def get_profile(session_token: str) -> JSONResponse:
+async def get_profile(request: Request, session_token: str = None) -> JSONResponse:
     """
     Fetch student profile (name)
+    
+    Android Fix: Accepts session_token from query param OR cookie
     """
     try:
+        # ANDROID FIX: Try cookie if query param is missing
+        if not session_token:
+            session_token = request.cookies.get("session_token")
+        
+        if not session_token:
+            return JSONResponse({
+                "success": False,
+                "error": "Session token required"
+            }, status_code=401)
+        
         result = await attendance_service.get_student_profile(session_token)
         
         if result['success']:
@@ -1891,11 +1973,29 @@ async def clear_activity_endpoint(admin_key: str) -> JSONResponse:
 
 
 @app.get("/api/attendance/details")
-async def get_absence_details(session_token: str, student_class_id: str, class_id: str) -> JSONResponse:
+async def get_absence_details(request: Request, session_token: str = None, student_class_id: str = None, class_id: str = None) -> JSONResponse:
     """
     Fetch absence details (dates/times) for specific module
+    
+    Android Fix: Accepts session_token from query param OR cookie
     """
     try:
+        # ANDROID FIX: Try cookie if query param is missing
+        if not session_token:
+            session_token = request.cookies.get("session_token")
+        
+        if not session_token:
+            return JSONResponse({
+                "success": False,
+                "error": "Session token required"
+            }, status_code=401)
+        
+        if not student_class_id or not class_id:
+            return JSONResponse({
+                "success": False,
+                "error": "student_class_id and class_id are required"
+            }, status_code=400)
+        
         result = await attendance_service.get_absence_details(session_token, student_class_id, class_id)
         
         if result['success']:
@@ -1919,16 +2019,36 @@ async def get_absence_details(session_token: str, student_class_id: str, class_i
 
 
 @app.post("/api/attendance/logout")
-async def attendance_logout(session_token: str) -> JSONResponse:
+async def attendance_logout(request: Request, session_token: str = None) -> JSONResponse:
     """
     Logout user and invalidate session
+    
+    Android Fix: Accepts session_token from body/query OR cookie, and clears cookie
     """
     try:
+        # ANDROID FIX: Try cookie if body/query param is missing
+        if not session_token:
+            session_token = request.cookies.get("session_token")
+        
+        if not session_token:
+            return JSONResponse({
+                "success": False,
+                "message": "No active session"
+            })
+        
         success = attendance_service.logout(session_token)
-        return JSONResponse({
+        
+        # Create response
+        response = JSONResponse({
             "success": success,
             "message": "Logged out successfully" if success else "Session not found"
         })
+        
+        # ANDROID FIX: Clear the cookie on logout
+        response.delete_cookie(key="session_token", path="/")
+        
+        return response
+        
     except Exception as exc:
         logger.exception("Error during logout")
         return JSONResponse({
