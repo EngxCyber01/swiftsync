@@ -434,20 +434,22 @@ async def upload_data(package: bytes = None) -> JSONResponse:
 
 
 @app.get("/api/files")
-async def list_files() -> JSONResponse:
-    """List all files grouped by subject"""
+async def list_files(semester: str = None) -> JSONResponse:
+    """List all files grouped by subject with optional semester filtering"""
     import sqlite3
     from pathlib import Path
     
     files_by_subject = {}
+    semesters = set()  # Track unique semesters
     
-    # Try to get subject information and upload dates from database
+    # Try to get subject, semester and upload dates from database
     db_path = Path(__file__).parent / "data" / "lecture_sync.db"
     if db_path.exists():
         try:
             with sqlite3.connect(db_path) as conn:
-                cursor = conn.execute("SELECT filename, subject, upload_date FROM synced_items WHERE filename IS NOT NULL")
-                db_info = {row[0]: {"subject": row[1], "upload_date": row[2]} for row in cursor.fetchall()}
+                query = "SELECT filename, subject, upload_date, semester FROM synced_items WHERE filename IS NOT NULL"
+                cursor = conn.execute(query)
+                db_info = {row[0]: {"subject": row[1], "upload_date": row[2], "semester": row[3] or "Spring 2025/2026"} for row in cursor.fetchall()}
         except Exception as e:
             logger.error("Error reading data from database: %s", e)
             db_info = {}
@@ -461,6 +463,12 @@ async def list_files() -> JSONResponse:
                 stat = path.stat()
                 file_db_info = db_info.get(path.name, {})
                 subject = file_db_info.get("subject") or "Other"
+                file_semester = file_db_info.get("semester") or "Spring 2025/2026"
+                semesters.add(file_semester)
+                
+                # Filter by semester if specified
+                if semester and file_semester != semester:
+                    continue
                 
                 # Use upload_date from database if available, otherwise fall back to file modified time
                 upload_date = file_db_info.get("upload_date")
@@ -470,15 +478,19 @@ async def list_files() -> JSONResponse:
                 file_info = {
                     "name": path.name,
                     "size_bytes": stat.st_size,
-                    "modified": upload_date,  # This is now the original upload date from the portal
+                    "modified": upload_date,
                     "url": f"/files/{path.name}",
+                    "semester": file_semester
                 }
                 
                 if subject not in files_by_subject:
                     files_by_subject[subject] = []
                 files_by_subject[subject].append(file_info)
     
-    return JSONResponse(files_by_subject)
+    return JSONResponse({
+        "files": files_by_subject,
+        "semesters": sorted(list(semesters), reverse=True)  # Most recent first
+    })
 
 
 @app.get("/api/download/{filename}")
@@ -2837,16 +2849,64 @@ async def dashboard() -> HTMLResponse:
                 color: var(--bg-primary);
                 border: none;
                 border-radius: 12px;
-                cursor: pointer;
                 font-weight: 700;
-                font-size: 0.9rem;
-                transition: all 0.1s ease-out;  /* ULTRA FAST response */
+                cursor: pointer;
+                transition: all 0.3s;
                 display: flex;
                 align-items: center;
                 gap: 0.75rem;
-                position: relative;
-                overflow: hidden;
-                user-select: none;
+                box-shadow: 0 4px 15px rgba(0, 217, 255, 0.3);
+            }}
+            
+            /* Semester Filter */
+            .semester-filter {{
+                display: flex;
+                gap: 0.75rem;
+                margin-bottom: 2rem;
+                padding: 1rem;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border);
+                border-radius: 16px;
+                flex-wrap: wrap;
+                align-items: center;
+            }}
+            
+            .semester-btn {{
+                padding: 0.75rem 1.5rem;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                color: var(--text-secondary);
+                font-weight: 600;
+                font-size: 0.9rem;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                white-space: nowrap;
+            }}
+            
+            .semester-btn:hover {{
+                background: var(--bg-primary);
+                border-color: var(--accent);
+                color: var(--text-primary);
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0, 217, 255, 0.2);
+            }}
+            
+            .semester-btn.active {{
+                background: linear-gradient(135deg, var(--accent), var(--success));
+                border-color: var(--accent);
+                color: var(--bg-primary);
+                box-shadow: 0 4px 15px rgba(0, 217, 255, 0.3);
+            }}
+            
+            .semester-btn.active i {{
+                animation: pulse 2s ease-in-out infinite;
+            }}
+            
+            .sync-btn:hover {{
                 -webkit-tap-highlight-color: transparent;  /* Remove mobile tap delay */
                 touch-action: manipulation;  /* Prevent zoom on double-tap */
                 will-change: transform, box-shadow;  /* GPU acceleration */
@@ -4362,6 +4422,9 @@ async def dashboard() -> HTMLResponse:
                 </div>
             </div>
             
+            <!-- Semester Filter -->
+            <div id="semesterFilter" class="semester-filter" style="display: none; animation: fadeIn 0.5s ease 0.5s both"></div>
+            
             <!-- Files Grid -->
             <div id="fileGrid" style="animation: fadeIn 0.5s ease 0.5s both">
                 <div class="loading">
@@ -4777,15 +4840,21 @@ async def dashboard() -> HTMLResponse:
                 }}
             }}
             
-            // Load files on page load
-            async function loadFiles() {{
+            // Global variables for semester filtering
+            let currentSemester = null;
+            let availableSemesters = [];
+            
+            // Load files with optional semester filter
+            async function loadFiles(semester = null) {{
                 try {{
                     // OFFLINE CHECK: Show cached data or friendly message
                     if (!navigator.onLine) {{
                         console.log('📴 Offline - attempting to load cached data');
                     }}
                     
-                    const response = await fetch('/api/files');
+                    currentSemester = semester;
+                    const url = semester ? `/api/files?semester=${{encodeURIComponent(semester)}}` : '/api/files';
+                    const response = await fetch(url);
                     
                     // Handle offline or network errors gracefully
                     if (!response.ok) {{
@@ -4793,7 +4862,11 @@ async def dashboard() -> HTMLResponse:
                     }}
                     
                     const data = await response.json();
-                    renderFiles(data);
+                    availableSemesters = data.semesters || [];
+                    
+                    // Render semester filter if multiple semesters exist
+                    renderSemesterFilter();
+                    renderFiles(data.files);
                 }} catch (error) {{
                     console.error('❌ Error loading files:', error);
                     
@@ -4813,6 +4886,29 @@ async def dashboard() -> HTMLResponse:
                         </div>
                     `;
                 }}
+            }}
+            
+            // Render semester filter buttons
+            function renderSemesterFilter() {{
+                const filterContainer = document.getElementById('semesterFilter');
+                if (!filterContainer) return;
+                
+                if (availableSemesters.length <= 1) {{
+                    filterContainer.style.display = 'none';
+                    return;
+                }}
+                
+                filterContainer.style.display = 'flex';
+                filterContainer.innerHTML = `
+                    <button class="semester-btn ${{!currentSemester ? 'active' : ''}}" onclick="loadFiles()">
+                        <i class="fas fa-list"></i> All Semesters
+                    </button>
+                    ${{availableSemesters.map(sem => `
+                        <button class="semester-btn ${{currentSemester === sem ? 'active' : ''}}" onclick="loadFiles('${{sem}}')">
+                            <i class="fas fa-calendar-${{sem.includes('Spring') ? 'alt' : 'week'}}"></i> ${{sem}}
+                        </button>
+                    `).join('')}}
+                `;
             }}
             
             // Initialize
