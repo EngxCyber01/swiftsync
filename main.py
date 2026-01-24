@@ -434,22 +434,20 @@ async def upload_data(package: bytes = None) -> JSONResponse:
 
 
 @app.get("/api/files")
-async def list_files(semester: str = None) -> JSONResponse:
-    """List all files grouped by subject with optional semester filtering"""
+async def list_files() -> JSONResponse:
+    """List all files grouped by semester and subject"""
     import sqlite3
     from pathlib import Path
     
-    files_by_subject = {}
-    semesters = set()  # Track unique semesters
+    files_by_semester = {}
     
-    # Try to get subject, semester and upload dates from database
+    # Try to get subject, semester information and upload dates from database
     db_path = Path(__file__).parent / "data" / "lecture_sync.db"
     if db_path.exists():
         try:
             with sqlite3.connect(db_path) as conn:
-                query = "SELECT filename, subject, upload_date, semester FROM synced_items WHERE filename IS NOT NULL"
-                cursor = conn.execute(query)
-                db_info = {row[0]: {"subject": row[1], "upload_date": row[2], "semester": row[3] or "Spring 2025/2026"} for row in cursor.fetchall()}
+                cursor = conn.execute("SELECT filename, subject, upload_date, semester FROM synced_items WHERE filename IS NOT NULL")
+                db_info = {row[0]: {"subject": row[1], "upload_date": row[2], "semester": row[3]} for row in cursor.fetchall()}
         except Exception as e:
             logger.error("Error reading data from database: %s", e)
             db_info = {}
@@ -463,12 +461,7 @@ async def list_files(semester: str = None) -> JSONResponse:
                 stat = path.stat()
                 file_db_info = db_info.get(path.name, {})
                 subject = file_db_info.get("subject") or "Other"
-                file_semester = file_db_info.get("semester") or "Spring 2025/2026"
-                semesters.add(file_semester)
-                
-                # Filter by semester if specified
-                if semester and file_semester != semester:
-                    continue
+                semester = file_db_info.get("semester") or "Fall Semester"
                 
                 # Use upload_date from database if available, otherwise fall back to file modified time
                 upload_date = file_db_info.get("upload_date")
@@ -478,19 +471,19 @@ async def list_files(semester: str = None) -> JSONResponse:
                 file_info = {
                     "name": path.name,
                     "size_bytes": stat.st_size,
-                    "modified": upload_date,
+                    "modified": upload_date,  # This is now the original upload date from the portal
                     "url": f"/files/{path.name}",
-                    "semester": file_semester
                 }
                 
-                if subject not in files_by_subject:
-                    files_by_subject[subject] = []
-                files_by_subject[subject].append(file_info)
+                # Group by semester first, then by subject
+                if semester not in files_by_semester:
+                    files_by_semester[semester] = {}
+                if subject not in files_by_semester[semester]:
+                    files_by_semester[semester][subject] = []
+                files_by_semester[semester][subject].append(file_info)
     
-    return JSONResponse({
-        "files": files_by_subject,
-        "semesters": sorted(list(semesters), reverse=True)  # Most recent first
-    })
+    logger.info(f"📊 API returning {len(files_by_semester)} semesters with total {sum(sum(len(files) for files in subjects.values()) for subjects in files_by_semester.values())} files")
+    return JSONResponse(files_by_semester)
 
 
 @app.get("/api/download/{filename}")
@@ -2849,64 +2842,16 @@ async def dashboard() -> HTMLResponse:
                 color: var(--bg-primary);
                 border: none;
                 border-radius: 12px;
+                cursor: pointer;
                 font-weight: 700;
-                cursor: pointer;
-                transition: all 0.3s;
-                display: flex;
-                align-items: center;
-                gap: 0.75rem;
-                box-shadow: 0 4px 15px rgba(0, 217, 255, 0.3);
-            }}
-            
-            /* Semester Filter */
-            .semester-filter {{
-                display: flex;
-                gap: 0.75rem;
-                margin-bottom: 2rem;
-                padding: 1rem;
-                background: var(--bg-secondary);
-                border: 1px solid var(--border);
-                border-radius: 16px;
-                flex-wrap: wrap;
-                align-items: center;
-            }}
-            
-            .semester-btn {{
-                padding: 0.75rem 1.5rem;
-                background: var(--bg-tertiary);
-                border: 1px solid var(--border);
-                border-radius: 12px;
-                color: var(--text-secondary);
-                font-weight: 600;
                 font-size: 0.9rem;
-                cursor: pointer;
-                transition: all 0.3s ease;
+                transition: all 0.1s ease-out;  /* ULTRA FAST response */
                 display: flex;
                 align-items: center;
-                gap: 0.5rem;
-                white-space: nowrap;
-            }}
-            
-            .semester-btn:hover {{
-                background: var(--bg-primary);
-                border-color: var(--accent);
-                color: var(--text-primary);
-                transform: translateY(-2px);
-                box-shadow: 0 4px 12px rgba(0, 217, 255, 0.2);
-            }}
-            
-            .semester-btn.active {{
-                background: linear-gradient(135deg, var(--accent), var(--success));
-                border-color: var(--accent);
-                color: var(--bg-primary);
-                box-shadow: 0 4px 15px rgba(0, 217, 255, 0.3);
-            }}
-            
-            .semester-btn.active i {{
-                animation: pulse 2s ease-in-out infinite;
-            }}
-            
-            .sync-btn:hover {{
+                gap: 0.75rem;
+                position: relative;
+                overflow: hidden;
+                user-select: none;
                 -webkit-tap-highlight-color: transparent;  /* Remove mobile tap delay */
                 touch-action: manipulation;  /* Prevent zoom on double-tap */
                 will-change: transform, box-shadow;  /* GPU acceleration */
@@ -4422,9 +4367,6 @@ async def dashboard() -> HTMLResponse:
                 </div>
             </div>
             
-            <!-- Semester Filter -->
-            <div id="semesterFilter" class="semester-filter" style="display: none; animation: fadeIn 0.5s ease 0.5s both"></div>
-            
             <!-- Files Grid -->
             <div id="fileGrid" style="animation: fadeIn 0.5s ease 0.5s both">
                 <div class="loading">
@@ -4627,9 +4569,9 @@ async def dashboard() -> HTMLResponse:
                     originalFilesData = JSON.parse(JSON.stringify(data)); // Deep copy
                 }}
                 const fileGrid = document.getElementById('fileGrid');
-                const subjects = Object.keys(data);
+                const semesters = Object.keys(data);
                 
-                if (subjects.length === 0) {{
+                if (semesters.length === 0) {{
                     fileGrid.innerHTML = `
                         <div class="empty-state" style="padding: 3rem;">
                             <i class="fas fa-cloud-download-alt" style="font-size: 4rem; color: var(--primary); margin-bottom: 1rem;"></i>
@@ -4650,47 +4592,92 @@ async def dashboard() -> HTMLResponse:
                 let html = '';
                 let totalFiles = 0;
                 let totalSize = 0;
+                let totalSubjects = 0;
                 
-                subjects.sort().forEach(subject => {{
-                    const files = data[subject];
-                    totalFiles += files.length;
-                    files.forEach(f => totalSize += f.size_bytes);
+                // Sort semesters (Fall first, then Spring)
+                const semesterOrder = ['Fall Semester', 'Spring Semester'];
+                const sortedSemesters = semesters.sort((a, b) => {{
+                    const aIndex = semesterOrder.indexOf(a);
+                    const bIndex = semesterOrder.indexOf(b);
+                    if (aIndex === -1) return 1;
+                    if (bIndex === -1) return -1;
+                    return aIndex - bIndex;
+                }});
+                
+                sortedSemesters.forEach(semester => {{
+                    const subjects = data[semester];
+                    const subjectNames = Object.keys(subjects);
+                    totalSubjects += subjectNames.length;
                     
+                    // Calculate semester stats
+                    let semesterFiles = 0;
+                    subjectNames.forEach(subject => {{
+                        semesterFiles += subjects[subject].length;
+                        subjects[subject].forEach(f => totalSize += f.size_bytes);
+                    }});
+                    totalFiles += semesterFiles;
+                    
+                    // Semester section (using same styling as subject-section)
                     html += `
-                        <div class="subject-section">
-                            <div class="subject-header" onclick="toggleSubject(this)">
-                                <div class="subject-title">
-                                    <i class="fas fa-book"></i>
-                                    ${{subject}}
-                                    <span class="file-count">${{files.length}} file${{files.length > 1 ? 's' : ''}}</span>
+                        <div class="subject-section" style="margin-bottom: 1.5rem;">
+                            <div class="subject-header" onclick="toggleSemester(this)" style="background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%); cursor: pointer;">
+                                <div class="subject-title" style="color: white; font-size: 1.1rem; font-weight: 700;">
+                                    <i class="fas fa-calendar-alt" style="color: white;"></i>
+                                    ${{semester}}
+                                    <span class="file-count" style="background: rgba(255,255,255,0.2); color: white;">${{semesterFiles}} file${{semesterFiles > 1 ? 's' : ''}}</span>
                                 </div>
                                 <div class="collapse-btn">
-                                    <i class="fas fa-chevron-down"></i>
+                                    <i class="fas fa-chevron-down" style="color: white; transform: rotate(-90deg);"></i>
                                 </div>
                             </div>
-                            <div class="subject-files">
-                                ${{files.map(file => `
-                                    <div class="file-item">
-                                        <div class="file-icon ${{getFileClass(file.name)}}">
-                                            ${{getFileIcon(file.name)}}
-                                        </div>
-                                        <div class="file-info">
-                                            <div class="file-name">${{file.name}}</div>
-                                            <div class="file-meta">
-                                                <span><i class="fas fa-clock"></i> ${{new Date(file.modified).toLocaleDateString()}}</span>
-                                            </div>
-                                        </div>
-                                        <div class="file-size">${{formatBytes(file.size_bytes)}}</div>
-                                        <a href="${{file.url}}" class="open-btn" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();">
-                                            <i class="fas fa-external-link-alt"></i>
-                                            <span>Open</span>
-                                        </a>
-                                        <button class="download-btn" onclick="downloadFile('${{file.url}}', '${{file.name}}', event); return false;">
-                                            <i class="fas fa-download"></i>
-                                            <span>Download</span>
-                                        </button>
+                            <div class="semester-content" style="display: none; padding-left: 0;">
+                    `;
+                    
+                    // Subjects within semester
+                    subjectNames.sort().forEach(subject => {{
+                        const files = subjects[subject];
+                        
+                        html += `
+                            <div class="subject-section" style="margin-left: 1rem; margin-bottom: 1rem;">
+                                <div class="subject-header" onclick="toggleSubject(this)">
+                                    <div class="subject-title">
+                                        <i class="fas fa-book"></i>
+                                        ${{subject}}
+                                        <span class="file-count">${{files.length}} file${{files.length > 1 ? 's' : ''}}</span>
                                     </div>
-                                `).join('')}}
+                                    <div class="collapse-btn">
+                                        <i class="fas fa-chevron-down"></i>
+                                    </div>
+                                </div>
+                                <div class="subject-files">
+                                    ${{files.map(file => `
+                                        <div class="file-item">
+                                            <div class="file-icon ${{getFileClass(file.name)}}">
+                                                ${{getFileIcon(file.name)}}
+                                            </div>
+                                            <div class="file-info">
+                                                <div class="file-name">${{file.name}}</div>
+                                                <div class="file-meta">
+                                                    <span><i class="fas fa-clock"></i> ${{new Date(file.modified).toLocaleDateString()}}</span>
+                                                </div>
+                                            </div>
+                                            <div class="file-size">${{formatBytes(file.size_bytes)}}</div>
+                                            <a href="${{file.url}}" class="open-btn" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();">
+                                                <i class="fas fa-external-link-alt"></i>
+                                                <span>Open</span>
+                                            </a>
+                                            <button class="download-btn" onclick="downloadFile('${{file.url}}', '${{file.name}}', event); return false;">
+                                                <i class="fas fa-download"></i>
+                                                <span>Download</span>
+                                            </button>
+                                        </div>
+                                    `).join('')}}
+                                </div>
+                            </div>
+                        `;
+                    }});
+                    
+                    html += `
                             </div>
                         </div>
                     `;
@@ -4699,7 +4686,7 @@ async def dashboard() -> HTMLResponse:
                 fileGrid.innerHTML = html;
                 document.getElementById('totalFiles').textContent = totalFiles;
                 document.getElementById('totalSize').textContent = formatBytes(totalSize);
-                document.getElementById('totalSubjects').textContent = subjects.length;
+                document.getElementById('totalSubjects').textContent = totalSubjects;
             }}
             
             function toggleSubject(header) {{
@@ -4716,6 +4703,20 @@ async def dashboard() -> HTMLResponse:
                 }}
             }}
             
+            function toggleSemester(header) {{
+                const section = header.closest('.subject-section');
+                const content = section.querySelector('.semester-content');
+                const icon = header.querySelector('.collapse-btn i');
+                
+                if (content.style.display === 'none') {{
+                    content.style.display = 'block';
+                    icon.style.transform = 'rotate(0deg)';
+                }} else {{
+                    content.style.display = 'none';
+                    icon.style.transform = 'rotate(-90deg)';
+                }}
+            }}
+            
             // Search functionality
             document.getElementById('searchInput').addEventListener('input', (e) => {{
                 const query = e.target.value.toLowerCase().trim();
@@ -4726,14 +4727,20 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 const filtered = {{}};
-                Object.keys(originalFilesData).forEach(subject => {{
-                    const matchingFiles = originalFilesData[subject].filter(file => 
-                        file.name.toLowerCase().includes(query) ||
-                        subject.toLowerCase().includes(query)
-                    );
-                    if (matchingFiles.length > 0) {{
-                        filtered[subject] = matchingFiles;
-                    }}
+                // Search through semester → subject → files structure
+                Object.keys(originalFilesData).forEach(semester => {{
+                    const subjects = originalFilesData[semester];
+                    Object.keys(subjects).forEach(subject => {{
+                        const matchingFiles = subjects[subject].filter(file => 
+                            file.name.toLowerCase().includes(query) ||
+                            subject.toLowerCase().includes(query) ||
+                            semester.toLowerCase().includes(query)
+                        );
+                        if (matchingFiles.length > 0) {{
+                            if (!filtered[semester]) filtered[semester] = {{}};
+                            filtered[semester][subject] = matchingFiles;
+                        }}
+                    }});
                 }});
                 
                 renderFiles(filtered, true);
@@ -4840,21 +4847,15 @@ async def dashboard() -> HTMLResponse:
                 }}
             }}
             
-            // Global variables for semester filtering
-            let currentSemester = null;
-            let availableSemesters = [];
-            
-            // Load files with optional semester filter
-            async function loadFiles(semester = null) {{
+            // Load files on page load
+            async function loadFiles() {{
                 try {{
                     // OFFLINE CHECK: Show cached data or friendly message
                     if (!navigator.onLine) {{
                         console.log('📴 Offline - attempting to load cached data');
                     }}
                     
-                    currentSemester = semester;
-                    const url = semester ? `/api/files?semester=${{encodeURIComponent(semester)}}` : '/api/files';
-                    const response = await fetch(url);
+                    const response = await fetch('/api/files');
                     
                     // Handle offline or network errors gracefully
                     if (!response.ok) {{
@@ -4862,11 +4863,7 @@ async def dashboard() -> HTMLResponse:
                     }}
                     
                     const data = await response.json();
-                    availableSemesters = data.semesters || [];
-                    
-                    // Render semester filter if multiple semesters exist
-                    renderSemesterFilter();
-                    renderFiles(data.files);
+                    renderFiles(data);
                 }} catch (error) {{
                     console.error('❌ Error loading files:', error);
                     
@@ -4886,29 +4883,6 @@ async def dashboard() -> HTMLResponse:
                         </div>
                     `;
                 }}
-            }}
-            
-            // Render semester filter buttons
-            function renderSemesterFilter() {{
-                const filterContainer = document.getElementById('semesterFilter');
-                if (!filterContainer) return;
-                
-                if (availableSemesters.length <= 1) {{
-                    filterContainer.style.display = 'none';
-                    return;
-                }}
-                
-                filterContainer.style.display = 'flex';
-                filterContainer.innerHTML = `
-                    <button class="semester-btn ${{!currentSemester ? 'active' : ''}}" onclick="loadFiles()">
-                        <i class="fas fa-list"></i> All Semesters
-                    </button>
-                    ${{availableSemesters.map(sem => `
-                        <button class="semester-btn ${{currentSemester === sem ? 'active' : ''}}" onclick="loadFiles('${{sem}}')">
-                            <i class="fas fa-calendar-${{sem.includes('Spring') ? 'alt' : 'week'}}"></i> ${{sem}}
-                        </button>
-                    `).join('')}}
-                `;
             }}
             
             // Initialize
@@ -5224,6 +5198,7 @@ async def dashboard() -> HTMLResponse:
                 }} else if (zone === 'attendance') {{
                     document.getElementById('attendanceTab').classList.add('active');
                     document.getElementById('attendanceZone').classList.add('active');
+                    // Don't save attendance as default - always default to lectures on app restart
                     
                     // Check if user has a saved session
                     checkAttendanceSession();
