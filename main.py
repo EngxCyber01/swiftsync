@@ -759,13 +759,13 @@ async def get_attendance(request: Request, session_token: str = None) -> JSONRes
     Android Fix: Accepts session_token from query param OR cookie
     """
     try:
-        # ANDROID FIX: Try cookie if query param is missing
-        if not session_token:
+        # ANDROID FIX: Try cookie if query param is missing or empty
+        if not session_token or session_token.strip() == "":
             session_token = request.cookies.get("session_token")
             if session_token:
                 logger.info("Using session token from cookie (Android fallback)")
         
-        if not session_token:
+        if not session_token or session_token.strip() == "":
             return JSONResponse({
                 "success": False,
                 "error": "Session token required"
@@ -804,11 +804,13 @@ async def get_profile(request: Request, session_token: str = None) -> JSONRespon
     Android Fix: Accepts session_token from query param OR cookie
     """
     try:
-        # ANDROID FIX: Try cookie if query param is missing
-        if not session_token:
+        # ANDROID FIX: Try cookie if query param is missing or empty
+        if not session_token or session_token.strip() == "":
             session_token = request.cookies.get("session_token")
+            if session_token:
+                logger.info("Using session token from cookie (Android fallback)")
         
-        if not session_token:
+        if not session_token or session_token.strip() == "":
             return JSONResponse({
                 "success": False,
                 "error": "Session token required"
@@ -1980,11 +1982,13 @@ async def get_absence_details(request: Request, session_token: str = None, stude
     Android Fix: Accepts session_token from query param OR cookie
     """
     try:
-        # ANDROID FIX: Try cookie if query param is missing
-        if not session_token:
+        # ANDROID FIX: Try cookie if query param is missing or empty
+        if not session_token or session_token.strip() == "":
             session_token = request.cookies.get("session_token")
+            if session_token:
+                logger.info("Using session token from cookie (Android fallback)")
         
-        if not session_token:
+        if not session_token or session_token.strip() == "":
             return JSONResponse({
                 "success": False,
                 "error": "Session token required"
@@ -2026,11 +2030,13 @@ async def attendance_logout(request: Request, session_token: str = None) -> JSON
     Android Fix: Accepts session_token from body/query OR cookie, and clears cookie
     """
     try:
-        # ANDROID FIX: Try cookie if body/query param is missing
-        if not session_token:
+        # ANDROID FIX: Try cookie if body/query param is missing or empty
+        if not session_token or session_token.strip() == "":
             session_token = request.cookies.get("session_token")
+            if session_token:
+                logger.info("Using session token from cookie for logout (Android fallback)")
         
-        if not session_token:
+        if not session_token or session_token.strip() == "":
             return JSONResponse({
                 "success": False,
                 "message": "No active session"
