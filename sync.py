@@ -47,7 +47,8 @@ def _get_semester_from_subject(subject: str) -> str:
     spring_subjects = [
         'Numerical Analysis and Probability',
         'Data Communication',
-        'Object Oriented Programming'
+        'Object Oriented Programming',
+        'Software Design and Modelling with UML'
     ]
     
     if subject in fall_subjects:
@@ -55,7 +56,7 @@ def _get_semester_from_subject(subject: str) -> str:
     elif subject in spring_subjects:
         return 'Spring Semester'
     else:
-        return 'Fall Semester'  # Default to Fall
+        return 'Spring Semester'  # Default to Spring (current semester)
 
 
 def _init_db() -> None:
@@ -101,7 +102,7 @@ def _seen(item_id: str) -> bool:
 
 
 def _mark_seen(item_id: str, subject: str = None, filename: str = None, upload_date: str = None) -> None:
-    semester = _get_semester_from_subject(subject) if subject else 'Fall Semester'
+    semester = _get_semester_from_subject(subject) if subject else 'Spring Semester'
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO synced_items (id, subject, filename, upload_date, semester) VALUES (?, ?, ?, ?, ?)", 

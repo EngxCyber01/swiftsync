@@ -426,6 +426,32 @@ def get_threat_logs(limit: int = 50) -> List[Dict]:
         ]
 
 
+def has_threat_log(ip_address: str) -> bool:
+    """Check if an IP address has any threat logs"""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            
+            # Check if table exists
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='threat_logs'
+            """)
+            if not cursor.fetchone():
+                return False
+            
+            cursor.execute("""
+                SELECT 1 FROM threat_logs 
+                WHERE ip_address = ? 
+                LIMIT 1
+            """, (ip_address,))
+            
+            return cursor.fetchone() is not None
+    except Exception as e:
+        print(f"Error checking threat log: {e}")
+        return False
+
+
 # Initialize tables on import
 try:
     init_security_tables()
@@ -535,3 +561,84 @@ def is_ip_whitelisted(ip_address: str) -> bool:
         "::1",
     ]
     return ip_address in whitelist
+
+
+def detect_device_type(user_agent: str) -> Dict[str, str]:
+    """
+    Detect device type, OS, and browser from user agent string
+    Returns: {device: str, os: str, browser: str, icon: str}
+    """
+    if not user_agent:
+        return {"device": "Unknown", "os": "Unknown", "browser": "Unknown", "icon": "fa-question"}
+    
+    ua_lower = user_agent.lower()
+    
+    # Detect Device Type
+    if 'mobile' in ua_lower or 'android' in ua_lower or 'iphone' in ua_lower:
+        device = "Mobile"
+        icon = "fa-mobile-alt"
+    elif 'tablet' in ua_lower or 'ipad' in ua_lower:
+        device = "Tablet"
+        icon = "fa-tablet-alt"
+    else:
+        device = "Desktop"
+        icon = "fa-desktop"
+    
+    # Detect Operating System
+    if 'windows nt 10' in ua_lower or 'windows nt 11' in ua_lower:
+        os_name = "Windows 11"
+    elif 'windows nt 6.3' in ua_lower:
+        os_name = "Windows 8.1"
+    elif 'windows nt 6.2' in ua_lower:
+        os_name = "Windows 8"
+    elif 'windows nt 6.1' in ua_lower:
+        os_name = "Windows 7"
+    elif 'windows' in ua_lower:
+        os_name = "Windows"
+    elif 'android' in ua_lower:
+        # Extract Android version
+        import re
+        match = re.search(r'android\s+([\d.]+)', ua_lower)
+        version = match.group(1) if match else ''
+        os_name = f"Android {version}" if version else "Android"
+        icon = "fa-mobile-alt"
+    elif 'iphone' in ua_lower or 'ipad' in ua_lower:
+        # Extract iOS version
+        import re
+        match = re.search(r'os\s+([\d_]+)', ua_lower)
+        version = match.group(1).replace('_', '.') if match else ''
+        os_name = f"iOS {version}" if version else "iOS"
+        icon = "fa-apple"
+    elif 'mac os x' in ua_lower or 'macos' in ua_lower or 'macintosh' in ua_lower:
+        os_name = "macOS"
+        icon = "fa-apple"
+    elif 'linux' in ua_lower:
+        os_name = "Linux"
+    elif 'cros' in ua_lower:
+        os_name = "Chrome OS"
+    else:
+        os_name = "Unknown OS"
+    
+    # Detect Browser
+    if 'edg/' in ua_lower or 'edge' in ua_lower:
+        browser = "Edge"
+    elif 'chrome' in ua_lower and 'safari' in ua_lower:
+        browser = "Chrome"
+    elif 'firefox' in ua_lower:
+        browser = "Firefox"
+    elif 'safari' in ua_lower and 'chrome' not in ua_lower:
+        browser = "Safari"
+    elif 'opera' in ua_lower or 'opr/' in ua_lower:
+        browser = "Opera"
+    elif 'msie' in ua_lower or 'trident' in ua_lower:
+        browser = "Internet Explorer"
+    else:
+        browser = "Unknown Browser"
+    
+    return {
+        "device": device,
+        "os": os_name,
+        "browser": browser,
+        "icon": icon
+    }
+

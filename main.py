@@ -461,7 +461,7 @@ async def list_files() -> JSONResponse:
                 stat = path.stat()
                 file_db_info = db_info.get(path.name, {})
                 subject = file_db_info.get("subject") or "Other"
-                semester = file_db_info.get("semester") or "Fall Semester"
+                semester = file_db_info.get("semester") or "Spring Semester"
                 
                 # Use upload_date from database if available, otherwise fall back to file modified time
                 upload_date = file_db_info.get("upload_date")
@@ -1745,30 +1745,61 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                     <div class="section-icon">
                         <i class="fas fa-users"></i>
                     </div>
-                    <h2>Recent Visitors</h2>
+                    <h2>Recent Visitors & Activity Log</h2>
                 </div>
                 <div class="table-wrapper">
                     <table>
                         <thead>
                             <tr>
-                                <th>IP Address</th>
-                                <th>Student/User</th>
-                                <th>Timestamp</th>
-                                <th>Action</th>
-                                <th>User Agent</th>
-                                <th>Actions</th>
+                                <th><i class="fas fa-network-wired"></i> IP Address</th>
+                                <th><i class="fas fa-user"></i> User ID</th>
+                                <th><i class="fas fa-mobile-alt"></i> Device</th>
+                                <th><i class="fas fa-clock"></i> Timestamp</th>
+                                <th><i class="fas fa-bolt"></i> Action</th>
+                                <th><i class="fas fa-shield-alt"></i> Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {"".join([f'''
-                            <tr>
-                                <td><span class="ip-address">{visitor['ip_address']}</span></td>
-                                <td><span class="action-badge" style="background: rgba(34, 139, 34, 0.1); color: var(--kurdish-green);">{visitor.get('username', 'N/A')}</span></td>
-                                <td class="timestamp">{visitor['timestamp']}</td>
-                                <td><span class="action-badge">{visitor['action']}</span></td>
-                                <td class="timestamp">{visitor['user_agent'][:50] if visitor['user_agent'] else 'N/A'}...</td>
+                            <tr style="{"border-left: 4px solid #ef4444;" if db.has_threat_log(visitor['ip_address']) else ""}">
                                 <td>
-                                    <button class="btn btn-block" onclick="blockIP('{visitor['ip_address']}')">
+                                    <span class="ip-address" style="{"border-color: rgba(239, 68, 68, 0.5); color: #ef4444; background: rgba(239, 68, 68, 0.1);" if db.has_threat_log(visitor['ip_address']) else ""}">
+                                        {visitor['ip_address']}
+                                        {"<i class='fas fa-exclamation-triangle' style='color: #ef4444; margin-left: 6px;' title='Threat Detected'></i>" if db.has_threat_log(visitor['ip_address']) else ""}
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="action-badge" style="background: rgba(34, 139, 34, 0.1); color: var(--kurdish-green); border: 1px solid rgba(34, 139, 34, 0.3);">
+                                        <i class="fas fa-id-card"></i> {visitor.get('username', 'Guest')}
+                                    </span>
+                                </td>
+                                <td>
+                                    {f"""
+                                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                                        <span style="display: flex; align-items: center; gap: 6px; color: var(--kurdish-yellow); font-weight: 600; font-size: 0.875rem;">
+                                            <i class="fas {db.detect_device_type(visitor['user_agent'])['icon']}"></i>
+                                            {db.detect_device_type(visitor['user_agent'])['device']}
+                                        </span>
+                                        <span style="color: var(--text-secondary); font-size: 0.75rem;">
+                                            <i class="fas fa-desktop" style="font-size: 0.7rem;"></i> {db.detect_device_type(visitor['user_agent'])['os']}
+                                        </span>
+                                        <span style="color: var(--text-secondary); font-size: 0.75rem;">
+                                            <i class="fas fa-globe" style="font-size: 0.7rem;"></i> {db.detect_device_type(visitor['user_agent'])['browser']}
+                                        </span>
+                                    </div>
+                                    """ if visitor['user_agent'] else "<span style='color: var(--text-secondary);'>Unknown</span>"}
+                                </td>
+                                <td class="timestamp" style="font-family: 'SF Mono', monospace; font-size: 0.8rem;">
+                                    <i class="fas fa-calendar-alt" style="color: var(--kurdish-yellow); margin-right: 4px;"></i>
+                                    {visitor['timestamp']}
+                                </td>
+                                <td>
+                                    <span class="action-badge" style="background: rgba(59, 130, 246, 0.1); color: var(--info); border: 1px solid rgba(59, 130, 246, 0.3);">
+                                        <i class="fas fa-bolt"></i> {visitor['action']}
+                                    </span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-block" onclick="blockIP('{visitor['ip_address']}')" style="font-size: 0.8rem; padding: 0.5rem 1rem;">
                                         <i class="fas fa-ban"></i> Block
                                     </button>
                                 </td>
@@ -4847,6 +4878,16 @@ async def dashboard() -> HTMLResponse:
                 }}
             }}
             
+            // Restore last active zone on page load (default to lectures)
+            window.addEventListener('load', () => {{
+                const lastZone = localStorage.getItem('lastActiveZone');
+                // Always default to lectures unless explicitly on attendance
+                if (lastZone && lastZone === 'attendance') {{
+                    // Don't auto-switch to attendance, keep lectures as default
+                }}
+                // Lectures is already active by default in HTML
+            }});
+            
             // Load files on page load
             async function loadFiles() {{
                 try {{
@@ -5195,10 +5236,11 @@ async def dashboard() -> HTMLResponse:
                 if (zone === 'lectures') {{
                     document.getElementById('lecturesTab').classList.add('active');
                     document.getElementById('lecturesZone').classList.add('active');
+                    localStorage.setItem('lastActiveZone', 'lectures');
                 }} else if (zone === 'attendance') {{
                     document.getElementById('attendanceTab').classList.add('active');
                     document.getElementById('attendanceZone').classList.add('active');
-                    // Don't save attendance as default - always default to lectures on app restart
+                    localStorage.setItem('lastActiveZone', 'attendance');
                     
                     // Check if user has a saved session
                     checkAttendanceSession();
@@ -5353,9 +5395,15 @@ async def dashboard() -> HTMLResponse:
                     const isStudentId = /^B\\d+$/.test(fullName);
                     
                     if (isStudentId) {{
+                        // Check for specific user ID and add custom label
+                        let customLabel = '';
+                        if (fullName === 'Alwand Jalal Abdullah') {{
+                            customLabel = ' <span style="color: #ff6b6b; font-weight: bold;">دارەتوویم نامەرد</span>';
+                        }}
+                        
                         // Show student ID with a friendly message
                         document.getElementById('studentNameDisplay').innerHTML = `
-                            <span style="color: var(--accent);">Welcome</span> <span style="font-weight: 600;">${{fullName}}</span>
+                            <span style="color: var(--accent);">Welcome</span> <span style="font-weight: 600;">${{fullName}}${{customLabel}}</span>
                             <small style="display: block; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
                                 📝 To show your name instead of ID, contact the administrator
                             </small>
