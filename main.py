@@ -36,17 +36,17 @@ _openai_key = os.getenv("OPENAI_API_KEY")
 SECRET_ADMIN_KEY = os.getenv("SECRET_ADMIN_KEY", "emadCyberSoft4SOC")
 
 if _gemini_key and _gemini_key != "your_gemini_api_key_here":
-    logger.info(f"✓ Gemini API key loaded (FREE tier) - starts with: {_gemini_key[:20]}...")
+    logger.info(f"[OK] Gemini API key loaded (FREE tier) - starts with: {_gemini_key[:20]}...")
 elif _openai_key and _openai_key != "your_openai_api_key_here":
-    logger.info(f"✓ OpenAI API key loaded (starts with: {_openai_key[:20]}...)")
+    logger.info(f"[OK] OpenAI API key loaded (starts with: {_openai_key[:20]}...)")
 else:
-    logger.warning("⚠ No AI API key configured. Set GEMINI_API_KEY (free) or OPENAI_API_KEY")
+    logger.warning("[WARN] No AI API key configured. Set GEMINI_API_KEY (free) or OPENAI_API_KEY")
 
 # Log admin key for debugging
 if SECRET_ADMIN_KEY:
-    logger.info("✓ Admin SOC key configured (hidden for security)")
+    logger.info("[OK] Admin SOC key configured (hidden for security)")
 else:
-    logger.warning("⚠ No admin key found, using default")
+    logger.warning("[WARN] No admin key found, using default")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
@@ -318,7 +318,7 @@ async def sync_worker() -> None:
                 except Exception as e:
                     logger.error(f"❌ Failed to send Telegram notification: {e}")
             else:
-                logger.info("✓ No new lectures found")
+                logger.info("[OK] No new lectures found")
         except AuthError as exc:
             logger.warning("Authentication error in sync worker: %s. Will retry with re-authentication.", exc)
             try:
@@ -1810,7 +1810,7 @@ async def get_official_results(request: Request, session_token: str = None) -> J
 
                         results = final_results
 
-                        logger.info(f"✓ Successfully parsed {len(results)} official results for student {student_id}")
+                        logger.info(f"[OK] Successfully parsed {len(results)} official results for student {student_id}")
                         
                         return {
                             'success': True,
@@ -1837,7 +1837,7 @@ async def get_official_results(request: Request, session_token: str = None) -> J
                     if not isinstance(results, list):
                         results = [results] if results else []
                     
-                    logger.info(f"✓ Successfully fetched {len(results)} official results for student {student_id}")
+                    logger.info(f"[OK] Successfully fetched {len(results)} official results for student {student_id}")
                     
                     return {
                         'success': True,

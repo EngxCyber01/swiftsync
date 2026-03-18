@@ -599,13 +599,13 @@ def get_all_results_count() -> int:
 # Initialize tables on import
 try:
     init_security_tables()
-    print("✓ Security tables initialized successfully")
+    print("[OK] Security tables initialized successfully")
 except Exception as e:
     print(f"Error initializing security tables: {e}")
 
 try:
     init_results_table()
-    print("✓ Results table initialized successfully")
+    print("[OK] Results table initialized successfully")
 except Exception as e:
     print(f"Error initializing results table: {e}")
 
