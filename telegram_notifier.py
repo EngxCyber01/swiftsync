@@ -71,46 +71,30 @@ def format_lecture_notification(
     Returns:
         Formatted message string with Kurdish text
     """
-    # Format the date nicely (Iraq timezone: Asia/Baghdad UTC+3)
+    # Iraq timezone (UTC+3)
     iraq_tz = pytz.timezone('Asia/Baghdad')
-    current_time = datetime.now(iraq_tz)
-    
-    # Format date (dd/mm/yyyy) and time (12-hour format with AM/PM)
-    date_formatted = current_time.strftime("%d/%m/%Y")
-    time_formatted = current_time.strftime("%I:%M %p")
-    
-    # Build the clean, professional message
-    message_parts = [
-        "📢 ئاگاداری نوێ",
-        "",
-        "لێکچەری نوێ بۆ ئەم بابەتە زیادکرا:",
-    ]
-    
-    # Add subject name with emoji
-    if course_name:
-        message_parts.append(f"📘 {course_name}")
-    else:
-        message_parts.append(f"📘 {lecture_title}")
-    
-    message_parts.append("")
-    
-    # Add lecture number if available
-    if lecture_number:
-        message_parts.append(f"🔹 لێکچەر: {lecture_number}")
-    
-    # Add date and time on separate lines
-    message_parts.append(f"📅 {date_formatted}")
-    message_parts.append(f"🕒 {time_formatted}")
-    
-    message_parts.append("")
-    message_parts.append("✅ لە سیستەمەکەدا ئامادەیە")
-    
-    # Add link at the end
-    if lecture_link:
-        message_parts.append("🔗 بۆ بینینی لێکچەرەکە:")
-        message_parts.append(lecture_link)
-    
-    return "\n".join(message_parts)
+    now = datetime.now(iraq_tz)
+
+    # Keep date/time compact and readable for students
+    date_formatted = now.strftime("%d/%m/%Y")
+    time_formatted = now.strftime("%I:%M %p").lstrip("0")
+
+    subject_name = course_name if course_name else lecture_title
+    lecture_number_text = str(lecture_number) if lecture_number is not None else "-"
+    system_link = lecture_link if lecture_link else "https://swiftsync-013r.onrender.com/"
+
+    # Polished production format requested by user
+    return (
+        "📢 ئاگاداری نوێ\n\n"
+        "لێکچەرێکی نوێ بۆ ئەم بابەتە زیادکرا:\n"
+        f"📘 {subject_name}\n\n"
+        f"🔹 لێکچەر: {lecture_number_text}\n"
+        f"📅 {date_formatted}\n"
+        f"🕒 {time_formatted}\n\n"
+        "✅ لە سیستەمەکەدا ئامادەیە\n"
+        "🔗 بۆ بینینی لێکچەرەکە:\n"
+        f"{system_link}"
+    )
 
 
 def notify_new_lecture(
@@ -176,7 +160,8 @@ def notify_new_lecture(
 def notify_multiple_lectures(
     file_count: int,
     subject: Optional[str] = None,
-    upload_date: Optional[str] = None
+    upload_date: Optional[str] = None,
+    base_url: Optional[str] = None
 ) -> bool:
     """
     Send a summary notification when multiple lectures are uploaded (Kurdish version)
@@ -193,22 +178,27 @@ def notify_multiple_lectures(
         # Get Iraq timezone (Asia/Baghdad UTC+3)
         iraq_tz = pytz.timezone('Asia/Baghdad')
         current_time = datetime.now(iraq_tz)
-        
-        # Format date and time in Kurdish numerals
-        date_formatted = current_time.strftime("%d/%m/%Y").replace('0', '٠').replace('1', '١').replace('2', '٢').replace('3', '٣').replace('4', '٤').replace('5', '٥').replace('6', '٦').replace('7', '٧').replace('8', '٨').replace('9', '٩')
-        time_formatted = current_time.strftime("%I:%M").replace('0', '٠').replace('1', '١').replace('2', '٢').replace('3', '٣').replace('4', '٤').replace('5', '٥').replace('6', '٦').replace('7', '٧').replace('8', '٨').replace('9', '٩')
-        count_formatted = str(file_count).replace('0', '٠').replace('1', '١').replace('2', '٢').replace('3', '٣').replace('4', '٤').replace('5', '٥').replace('6', '٦').replace('7', '٧').replace('8', '٨').replace('9', '٩')
-        
+
+        date_formatted = current_time.strftime("%d/%m/%Y")
+        time_formatted = current_time.strftime("%I:%M %p").lstrip("0")
+
         # Use subject name if provided, otherwise use generic text
         subject_name = subject if subject else "بابەتی جیاواز"
-        
-        message = f"""📚 لێکچەری نوێ داندراوە!
-📙 بابەت: {subject_name}
-🔄 ژمارە: {count_formatted} لێکچەری نوێ
-📆 بەروار: {date_formatted}
-🕓 کاتژمێر: {time_formatted}"""
-        
-        return send_telegram_message(message)
+        system_link = base_url if base_url else "https://swiftsync-013r.onrender.com/"
+
+        message = (
+            "📢 ئاگاداری نوێ\n\n"
+            "چەند لێکچەرێکی نوێ بۆ ئەم بابەتە زیادکرا:\n"
+            f"📘 {subject_name}\n\n"
+            f"🔹 ژمارەی لێکچەرە نوێکان: {file_count}\n"
+            f"📅 {date_formatted}\n"
+            f"🕒 {time_formatted}\n\n"
+            "✅ لە سیستەمەکەدا ئامادەیە\n"
+            "🔗 بۆ بینینی لێکچەرەکان:\n"
+            f"{system_link}"
+        )
+
+        return send_telegram_message(message, parse_mode=None)
         
     except Exception as e:
         logger.exception(f"Error notifying about multiple lectures: {e}")
