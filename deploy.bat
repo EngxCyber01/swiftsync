@@ -1,4 +1,4 @@
-:: SwiftSync - Quick Deploy to Render (Windows)
+﻿:: SwiftSync - Quick Deploy to Render (Windows)
 @echo off
 echo.
 echo ========================================
@@ -31,7 +31,7 @@ echo    GEMINI_API_KEY=your_gemini_api_key
 echo    SECRET_ADMIN_KEY=your_secret_admin_key
 echo    TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 echo    TELEGRAM_GROUP_ID=your_telegram_group_id
-echo    TELEGRAM_CHAT_ID=-1003523536992
+echo    TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 echo    BASE_URL=https://swiftsync-013r.onrender.com
 echo    RENDER=true
 echo.
@@ -61,3 +61,4 @@ echo    ALL SYSTEMS READY!
 echo ========================================
 echo.
 pause
+

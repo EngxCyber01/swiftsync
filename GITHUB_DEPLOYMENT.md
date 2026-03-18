@@ -1,6 +1,6 @@
-# GitHub Deployment Guide
+﻿# GitHub Deployment Guide
 
-## 🚀 Deploy to GitHub Pages
+## ðŸš€ Deploy to GitHub Pages
 
 ### Step 1: Create GitHub Repository
 
@@ -54,20 +54,20 @@ git push heroku main
 
 #### Option C: Render.com (Free)
 1. Create account at render.com
-2. New Web Service → Connect GitHub repo
+2. New Web Service â†’ Connect GitHub repo
 3. Settings:
    - Build Command: `pip install -r requirements.txt`
    - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 4. Add environment variables from `.env`
 5. Deploy!
 
-#### Option D: Railway.app (Recommended ⭐)
+#### Option D: Railway.app (Recommended â­)
 1. Visit railway.app
 2. "Deploy from GitHub"
 3. Select your repo
 4. Railway auto-detects Python
 5. Add environment variables
-6. Deploy → Get public URL
+6. Deploy â†’ Get public URL
 
 ### Step 3: Environment Variables
 
@@ -75,7 +75,7 @@ Add these to your deployment platform:
 
 ```
 PORTAL_USERNAME=B02052324
-PORTAL_PASSWORD=emadXoshnaw1$
+PORTAL_PASSWORD=your_portal_password_here
 APP_BASE_URL=https://tempapp-su.awrosoft.com
 AUTH_BASE_URL=https://tempids-su.awrosoft.com
 ```
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=port)
 ```
 
-## 📦 Files Needed for GitHub
+## ðŸ“¦ Files Needed for GitHub
 
 Create these files in your project:
 
@@ -133,16 +133,16 @@ web: uvicorn main:app --host=0.0.0.0 --port=$PORT
 
 ### 5. `README.md` (for GitHub)
 ```markdown
-# IUMS Lecture Portal 🎓
+# IUMS Lecture Portal ðŸŽ“
 
 Automated lecture synchronization system for Awrosoft Hevra IUMS.
 
 ## Features
-- 🔄 Auto-sync with portal
-- 📚 Subject organization
-- 🔍 Search functionality
-- 📱 Responsive design
-- 💾 Duplicate prevention
+- ðŸ”„ Auto-sync with portal
+- ðŸ“š Subject organization
+- ðŸ” Search functionality
+- ðŸ“± Responsive design
+- ðŸ’¾ Duplicate prevention
 
 ## Tech Stack
 - FastAPI
@@ -160,7 +160,7 @@ python main.py
 See GITHUB_DEPLOYMENT.md
 ```
 
-## 🎯 Quick Deploy Commands
+## ðŸŽ¯ Quick Deploy Commands
 
 ### Railway.app (Easiest)
 ```bash
@@ -188,7 +188,7 @@ git push heroku main
 heroku open
 ```
 
-## ⚠️ Important Notes
+## âš ï¸ Important Notes
 
 1. **Database**: Use environment variable for DB path
 2. **File Storage**: Consider cloud storage (S3/Azure) for production
@@ -196,7 +196,7 @@ heroku open
 4. **CORS**: May need to enable for external access
 5. **Rate Limiting**: Portal may block frequent requests
 
-## 🔒 Security
+## ðŸ”’ Security
 
 ### Protect Credentials
 ```python
@@ -220,35 +220,35 @@ async def dashboard(credentials: HTTPBasicCredentials = Depends(security)):
     # ... rest of code
 ```
 
-## 📊 Recommended: Railway.app
+## ðŸ“Š Recommended: Railway.app
 
 **Why Railway?**
-- ✅ Free tier generous
-- ✅ Auto-deploys from GitHub
-- ✅ Built-in database support
-- ✅ Easy environment variables
-- ✅ Custom domains
-- ✅ Automatic HTTPS
+- âœ… Free tier generous
+- âœ… Auto-deploys from GitHub
+- âœ… Built-in database support
+- âœ… Easy environment variables
+- âœ… Custom domains
+- âœ… Automatic HTTPS
 
 **Steps:**
 1. Go to railway.app
 2. Sign in with GitHub
-3. "New Project" → "Deploy from GitHub"
+3. "New Project" â†’ "Deploy from GitHub"
 4. Select `iums-lectures` repo
 5. Add environment variables
 6. Click "Deploy"
 7. Get public URL: `your-app.railway.app`
 
-**Done! ✨**
+**Done! âœ¨**
 
-## 🌐 Custom Domain (Optional)
+## ðŸŒ Custom Domain (Optional)
 
 1. Buy domain (Namecheap, GoDaddy)
-2. Add CNAME record: `lectures.yourdomain.com` → `your-app.railway.app`
+2. Add CNAME record: `lectures.yourdomain.com` â†’ `your-app.railway.app`
 3. Configure in Railway settings
 4. Enable HTTPS (automatic)
 
-## 📝 Post-Deployment
+## ðŸ“ Post-Deployment
 
 After deploying:
 
@@ -267,18 +267,19 @@ After deploying:
    https://your-app.railway.app
    ```
 
-## 🎉 You're Live!
+## ðŸŽ‰ You're Live!
 
 Share with students:
 ```
-📚 IUMS Lectures Portal
-🔗 https://your-app.railway.app
+ðŸ“š IUMS Lectures Portal
+ðŸ”— https://your-app.railway.app
 
-✨ All 2025-2026 lectures
-✨ Organized by subject
-✨ No login required
+âœ¨ All 2025-2026 lectures
+âœ¨ Organized by subject
+âœ¨ No login required
 ```
 
 ---
 
 **Need help?** Check Railway.app docs or Render.com guides!
+

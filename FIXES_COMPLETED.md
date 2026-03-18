@@ -1,12 +1,12 @@
-# Fixes Completed ✅
+﻿# Fixes Completed âœ…
 
-## 1. ✅ All IPs Unblocked
+## 1. âœ… All IPs Unblocked
 - **Action**: Cleared all blocked IPs from the database
 - **Result**: Your IP and all other blocked IPs have been unblocked
 - **Database**: `blacklist` table cleared successfully
 - **Status**: 0 blocked IPs remaining
 
-## 2. ✅ Admin Page Mobile Responsiveness Fixed
+## 2. âœ… Admin Page Mobile Responsiveness Fixed
 **Added comprehensive mobile CSS** for screens under 768px:
 
 ### Mobile Improvements:
@@ -26,7 +26,7 @@
 - Readable text sizes
 - Easy-to-tap buttons
 
-## 3. ✅ Telegram Bot Alert Logic Fixed
+## 3. âœ… Telegram Bot Alert Logic Fixed
 **Problem**: Bot was sending alerts every time Render wakes up from sleep (free tier issue)
 
 **Solution Implemented**:
@@ -39,8 +39,8 @@
 
 ### How It Works:
 1. When Render sleeps and wakes up, the sync checks the database
-2. If lecture ID already exists in `synced_items` table → Skip download + Skip notification
-3. If lecture ID is new → Download + Send Telegram notification
+2. If lecture ID already exists in `synced_items` table â†’ Skip download + Skip notification
+3. If lecture ID is new â†’ Download + Send Telegram notification
 4. This prevents duplicate alerts on every wake-up cycle
 
 ### Technical Details:
@@ -53,7 +53,7 @@ def _seen(item_id: str) -> bool:
 ```
 
 ## Admin Portal Access
-**URL**: https://swiftsync-013r.onrender.com/admin-portal?admin_key=emadCyberSoft4SOC
+**URL**: https://swiftsync-013r.onrender.com/admin-portal?admin_key=your_secret_admin_key_here
 
 ## How to Clear All Blocked IPs Again
 If you need to unblock all IPs in the future, click the **"Clear Activity"** button in the admin portal, or run:
@@ -76,4 +76,5 @@ Since you're using Render's free tier:
 3. Wait for a new lecture to be uploaded to test Telegram notifications
 4. Access admin portal from mobile to verify layout
 
-All fixes are now live in your local code and ready for deployment! 🚀
+All fixes are now live in your local code and ready for deployment! ðŸš€
+

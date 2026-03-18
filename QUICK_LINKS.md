@@ -1,6 +1,6 @@
-# 🔗 QUICK ACCESS LINKS
+﻿# ðŸ”— QUICK ACCESS LINKS
 
-## ✅ SYSTEM IS READY!
+## âœ… SYSTEM IS READY!
 
 **Status**: Server running on port 8000  
 **GitHub**: Code pushed and synced  
@@ -9,9 +9,9 @@
 
 ---
 
-## 🌐 LOCAL ACCESS (RIGHT NOW)
+## ðŸŒ LOCAL ACCESS (RIGHT NOW)
 
-### 📱 Public Student Portal
+### ðŸ“± Public Student Portal
 ```
 http://localhost:8000/
 ```
@@ -23,9 +23,9 @@ http://localhost:8000/
 - Student profile
 - PWA install button
 
-### 🔒 Admin SOC Dashboard  
+### ðŸ”’ Admin SOC Dashboard  
 ```
-http://localhost:8000/admin-portal?admin_key=emadCyberSoft4SOC
+http://localhost:8000/admin-portal?admin_key=your_secret_admin_key_here
 ```
 **Try it now!** Open this link to see:
 - Live security monitoring
@@ -37,11 +37,11 @@ http://localhost:8000/admin-portal?admin_key=emadCyberSoft4SOC
 
 ---
 
-## 🚀 PRODUCTION ACCESS (AFTER DEPLOYMENT)
+## ðŸš€ PRODUCTION ACCESS (AFTER DEPLOYMENT)
 
 ### Step 1: Deploy on Render.com
 1. Go to: **https://dashboard.render.com**
-2. Click **"New +"** → **"Web Service"**
+2. Click **"New +"** â†’ **"Web Service"**
 3. Connect GitHub: **EngxCyber01/swiftsync**
 4. Configure:
    ```
@@ -53,19 +53,19 @@ http://localhost:8000/admin-portal?admin_key=emadCyberSoft4SOC
 5. Add Environment Variables:
    ```
    OIDC_USERNAME=B02052324
-   OIDC_PASSWORD=emadXoshnaw1$
+   OIDC_PASSWORD=your_portal_password_here
    GEMINI_API_KEY=AIzaSyDSmVBPQwOEPL5d...
-   ADMIN_KEY=emadCyberSoft4SOC
+   ADMIN_KEY=your_secret_admin_key_here
    APP_BASE_URL=https://tempapp-su.awrosoft.com
    ```
 6. Click **"Create Web Service"**
-7. Wait 2-3 minutes ⏳
+7. Wait 2-3 minutes â³
 
 ### Step 2: Get Your Links
 
 Render will give you URLs like:
 
-#### 📱 PUBLIC LINK (Share with students)
+#### ðŸ“± PUBLIC LINK (Share with students)
 ```
 https://swiftsync-kurdish-soc.onrender.com/
 ```
@@ -76,9 +76,9 @@ https://swiftsync-kurdish-soc.onrender.com/
 - Check attendance
 - Install as mobile app
 
-#### 🔒 ADMIN LINK (Keep private!)
+#### ðŸ”’ ADMIN LINK (Keep private!)
 ```
-https://swiftsync-kurdish-soc.onrender.com/admin-portal?admin_key=emadCyberSoft4SOC
+https://swiftsync-kurdish-soc.onrender.com/admin-portal?admin_key=your_secret_admin_key_here
 ```
 **You can:**
 - Monitor security in real-time
@@ -89,11 +89,11 @@ https://swiftsync-kurdish-soc.onrender.com/admin-portal?admin_key=emadCyberSoft4
 
 ---
 
-## 📋 WHAT TO DO NEXT
+## ðŸ“‹ WHAT TO DO NEXT
 
 ### 1. Test Locally (Do Now)
-- [  ] Open http://localhost:8000/ ← Try now!
-- [  ] Open http://localhost:8000/admin-portal?admin_key=emadCyberSoft4SOC ← Try now!
+- [  ] Open http://localhost:8000/ â† Try now!
+- [  ] Open http://localhost:8000/admin-portal?admin_key=your_secret_admin_key_here â† Try now!
 - [  ] Download a lecture PDF
 - [  ] Generate an AI summary
 - [  ] Check the SOC dashboard
@@ -121,16 +121,16 @@ https://swiftsync-kurdish-soc.onrender.com/admin-portal?admin_key=emadCyberSoft4
 
 ---
 
-## 🎯 KEY FEATURES READY
+## ðŸŽ¯ KEY FEATURES READY
 
-### ✅ Security (Admin)
+### âœ… Security (Admin)
 - **7 detection layers** protecting your system
 - **100+ threat patterns** automatically blocked
 - **Real-time logging** of all suspicious activity
 - **IP blacklisting** with one-click blocking
 - **Kurdish SOC design** with professional interface
 
-### ✅ Student Features (Public)
+### âœ… Student Features (Public)
 - **51 lectures** organized by 8 subjects
 - **Upload dates preserved** (never change on re-sync)
 - **AI summaries** powered by Google Gemini
@@ -140,13 +140,13 @@ https://swiftsync-kurdish-soc.onrender.com/admin-portal?admin_key=emadCyberSoft4
 
 ---
 
-## 🔐 SECURITY INFO
+## ðŸ” SECURITY INFO
 
 **Admin Portal Access:**
 ```
-Key: emadCyberSoft4SOC
+Key: your_secret_admin_key_here
 ```
-⚠️ **Keep this private!** Only you should have it.
+âš ï¸ **Keep this private!** Only you should have it.
 
 **Student Access:**
 - No password needed for public portal
@@ -155,23 +155,23 @@ Key: emadCyberSoft4SOC
 
 ---
 
-## 📱 MOBILE APP INSTALLATION
+## ðŸ“± MOBILE APP INSTALLATION
 
 Once deployed, students can install as an app:
 
 **Android:**
 1. Open URL in Chrome
-2. Tap menu → "Install app"
+2. Tap menu â†’ "Install app"
 3. Done! App on home screen
 
 **iPhone:**
 1. Open URL in Safari
-2. Tap Share → "Add to Home Screen"  
+2. Tap Share â†’ "Add to Home Screen"  
 3. Done! App on home screen
 
 ---
 
-## 🆘 NEED HELP?
+## ðŸ†˜ NEED HELP?
 
 **Documentation:**
 - [VERIFIED_READY_TO_DEPLOY.md](VERIFIED_READY_TO_DEPLOY.md) - Full deployment guide
@@ -190,7 +190,7 @@ https://docs.render.com
 
 ---
 
-## ⚡ QUICK STATS
+## âš¡ QUICK STATS
 
 - **Files**: 53 files modified/created
 - **Lines of Code**: 10,705 insertions
@@ -202,24 +202,25 @@ https://docs.render.com
 
 ---
 
-## 🎉 READY TO GO!
+## ðŸŽ‰ READY TO GO!
 
-**Local Server**: ✅ Running (PID 28792)  
-**GitHub**: ✅ Synced  
-**Features**: ✅ All tested  
-**Security**: ✅ Active  
-**Database**: ✅ Migrated  
+**Local Server**: âœ… Running (PID 28792)  
+**GitHub**: âœ… Synced  
+**Features**: âœ… All tested  
+**Security**: âœ… Active  
+**Database**: âœ… Migrated  
 
-### 🚀 DEPLOY IN 3 STEPS:
+### ðŸš€ DEPLOY IN 3 STEPS:
 
 1. **Go to**: https://dashboard.render.com
-2. **Click**: New + → Web Service → Connect GitHub
-3. **Deploy**: Add env vars → Create Web Service
+2. **Click**: New + â†’ Web Service â†’ Connect GitHub
+3. **Deploy**: Add env vars â†’ Create Web Service
 
-**Result**: Live Kurdish SOC system in 5 minutes! 🎯
+**Result**: Live Kurdish SOC system in 5 minutes! ðŸŽ¯
 
 ---
 
 **Created**: January 22, 2026  
 **Status**: Production Ready  
-**Next Step**: Deploy to Render.com! 🚀
+**Next Step**: Deploy to Render.com! ðŸš€
+

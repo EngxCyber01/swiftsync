@@ -1,19 +1,19 @@
-# 🚀 GitHub Deployment - Step by Step
+﻿# ðŸš€ GitHub Deployment - Step by Step
 
-## ✅ STEP 1: Check Your Files
+## âœ… STEP 1: Check Your Files
 
 Your project is ready! You have:
-- ✅ `main.py` - Your app with dark theme
-- ✅ `auth.py` - Authentication
-- ✅ `sync.py` - Lecture sync
-- ✅ `requirements.txt` - Dependencies
-- ✅ `Procfile` - Deployment config
-- ✅ `runtime.txt` - Python version
-- ✅ `.gitignore` - Security (hides .env)
+- âœ… `main.py` - Your app with dark theme
+- âœ… `auth.py` - Authentication
+- âœ… `sync.py` - Lecture sync
+- âœ… `requirements.txt` - Dependencies
+- âœ… `Procfile` - Deployment config
+- âœ… `runtime.txt` - Python version
+- âœ… `.gitignore` - Security (hides .env)
 
 ---
 
-## 📦 STEP 2: Initialize Git (Run These Commands)
+## ðŸ“¦ STEP 2: Initialize Git (Run These Commands)
 
 Open PowerShell in your project folder and run:
 
@@ -33,21 +33,21 @@ git commit -m "Initial commit: IUMS Lecture Portal 2025-2026"
 
 ---
 
-## 🌐 STEP 3: Create GitHub Repository
+## ðŸŒ STEP 3: Create GitHub Repository
 
 1. **Open your browser**: Go to https://github.com/new
 
 2. **Fill in details**:
    - **Repository name**: `iums-lecture-portal`
    - **Description**: `IUMS Lecture Portal 2025-2026 - Auto-sync from Awrosoft`
-   - **Private**: ✅ **CHECK THIS** (your credentials are in code)
+   - **Private**: âœ… **CHECK THIS** (your credentials are in code)
    - **Do NOT check**: "Add README" or "Add .gitignore"
 
 3. **Click**: "Create repository"
 
 ---
 
-## 📤 STEP 4: Push to GitHub
+## ðŸ“¤ STEP 4: Push to GitHub
 
 Copy the commands GitHub shows you, OR run these (replace YOUR_USERNAME):
 
@@ -65,14 +65,14 @@ git push -u origin main
 **Note**: GitHub will ask for your username and password. Use a **Personal Access Token** instead of password.
 
 ### How to create token:
-1. GitHub.com → Settings (your profile)
-2. Developer settings → Personal access tokens → Tokens (classic)
-3. Generate new token → Check "repo" → Generate
+1. GitHub.com â†’ Settings (your profile)
+2. Developer settings â†’ Personal access tokens â†’ Tokens (classic)
+3. Generate new token â†’ Check "repo" â†’ Generate
 4. Copy the token and use it as password
 
 ---
 
-## ☁️ STEP 5: Deploy to Railway.app (EASIEST!)
+## â˜ï¸ STEP 5: Deploy to Railway.app (EASIEST!)
 
 ### 5.1: Sign Up
 1. Go to: https://railway.app
@@ -85,12 +85,12 @@ git push -u origin main
 3. Railway will start building
 
 ### 5.3: Add Environment Variables
-1. Click your project → "Variables" tab
+1. Click your project â†’ "Variables" tab
 2. Click "Add Variable" for each:
    ```
    OIDC_CLIENT_ID = TEMP-IDS_SU
    OIDC_USERNAME = B02052324
-   OIDC_PASSWORD = emadXoshnaw1$
+   OIDC_PASSWORD = your_portal_password_here
    ```
 3. Click "Deploy"
 
@@ -102,7 +102,7 @@ git push -u origin main
 
 ---
 
-## 🎉 DONE!
+## ðŸŽ‰ DONE!
 
 Your portal is now live! Share the URL with students:
 - **Local**: http://localhost:8000
@@ -110,7 +110,7 @@ Your portal is now live! Share the URL with students:
 
 ---
 
-## 🔄 Update Your Deployment
+## ðŸ”„ Update Your Deployment
 
 When you make changes:
 
@@ -121,11 +121,11 @@ git commit -m "Updated design"
 git push
 ```
 
-Railway auto-deploys on every push! 🚀
+Railway auto-deploys on every push! ðŸš€
 
 ---
 
-## ❓ Troubleshooting
+## â“ Troubleshooting
 
 **"Git not found"**:
 - Install Git: https://git-scm.com/download/win
@@ -141,8 +141,9 @@ Railway auto-deploys on every push! 🚀
 
 ---
 
-## 📞 Need Help?
+## ðŸ“ž Need Help?
 
-1. Check Railway logs: Dashboard → Logs tab
+1. Check Railway logs: Dashboard â†’ Logs tab
 2. Test locally first: `START_SERVER.bat`
 3. Verify `.env` file has correct credentials
+

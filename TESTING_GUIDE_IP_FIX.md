@@ -1,12 +1,12 @@
-# 🧪 Testing Guide - Real IP & Student Names
+﻿# ðŸ§ª Testing Guide - Real IP & Student Names
 
-## ✅ DEPLOYED SUCCESSFULLY!
+## âœ… DEPLOYED SUCCESSFULLY!
 
 Your changes are now live on Render. Follow this guide to verify everything works.
 
 ---
 
-## 🔍 Test 1: Real IP Addresses (5 minutes)
+## ðŸ” Test 1: Real IP Addresses (5 minutes)
 
 ### Step-by-Step:
 1. **From PC**:
@@ -25,9 +25,9 @@ Your changes are now live on Render. Follow this guide to verify everything work
    - Note your location (Mobile/Home/School)
 
 4. **Check Admin Portal**:
-   - Go to: https://swiftsync-013r.onrender.com/admin-portal?admin_key=emadCyberSoft4SOC
+   - Go to: https://swiftsync-013r.onrender.com/admin-portal?admin_key=your_secret_admin_key_here
    - Look at "Recent Visitors" table
-   - **Verify**: You should see **3 different IP addresses** ✅
+   - **Verify**: You should see **3 different IP addresses** âœ…
 
 ### Expected Result:
 ```
@@ -36,11 +36,11 @@ IP Address        | Student/User | Action
 10.0.0.123       | B12345       | Attendance Login: B12345
 78.39.145.67     | B12345       | Attendance Login: B12345
 ```
-✅ **Different IPs from different devices**
+âœ… **Different IPs from different devices**
 
 ---
 
-## 🔍 Test 2: Student Names Showing (2 minutes)
+## ðŸ” Test 2: Student Names Showing (2 minutes)
 
 ### Step-by-Step:
 1. Login to attendance with username **B12345** (or your ID)
@@ -53,11 +53,11 @@ IP Address        | Student/User | Action
 IP Address        | Student/User | Action
 78.39.145.67     | B12345       | Attendance Login: B12345
 ```
-✅ **Your student ID shown in Student/User column**
+âœ… **Your student ID shown in Student/User column**
 
 ---
 
-## 🔍 Test 3: Different Students (3 minutes)
+## ðŸ” Test 3: Different Students (3 minutes)
 
 ### If you have multiple accounts:
 1. Login with Student 1 (e.g., B12345)
@@ -71,11 +71,11 @@ IP Address        | Student/User | Action
 78.39.145.67     | B67890       | Attendance Login: B67890
 78.39.145.67     | B12345       | Attendance Login: B12345
 ```
-✅ **Different student names shown for different logins**
+âœ… **Different student names shown for different logins**
 
 ---
 
-## 🔍 Test 4: Failed Login Tracking (1 minute)
+## ðŸ” Test 4: Failed Login Tracking (1 minute)
 
 ### Step-by-Step:
 1. Try to login with **wrong password**
@@ -87,11 +87,11 @@ IP Address        | Student/User | Action
 IP Address        | Student/User | Action
 78.39.145.67     | B12345       | Failed Attendance Login: B12345
 ```
-✅ **Failed attempts are logged with username**
+âœ… **Failed attempts are logged with username**
 
 ---
 
-## ✅ Success Checklist
+## âœ… Success Checklist
 
 After all tests, verify:
 
@@ -103,7 +103,7 @@ After all tests, verify:
 
 ---
 
-## 📊 What Each Column Means
+## ðŸ“Š What Each Column Means
 
 | Column | Description | Example |
 |--------|-------------|---------|
@@ -115,15 +115,15 @@ After all tests, verify:
 
 ---
 
-## 🎯 Expected IP Patterns
+## ðŸŽ¯ Expected IP Patterns
 
 ### Same Network (WiFi):
 ```
-PC:     192.168.1.45    ← Local IP
-Laptop: 192.168.1.67    ← Different local IP
-Mobile: 192.168.1.123   ← Different local IP
+PC:     192.168.1.45    â† Local IP
+Laptop: 192.168.1.67    â† Different local IP
+Mobile: 192.168.1.123   â† Different local IP
 ```
-✅ All different because each device has unique IP
+âœ… All different because each device has unique IP
 
 ### Different Networks:
 ```
@@ -131,18 +131,18 @@ Home WiFi:    78.39.145.67
 School WiFi:  185.106.45.89
 Mobile Data:  94.127.234.12
 ```
-✅ All different because different internet connections
+âœ… All different because different internet connections
 
 ### Same Device, Different Times:
 ```
 Login 1: 78.39.145.67 (Home WiFi)
 Login 2: 94.127.234.12 (Mobile Data)
 ```
-✅ Different because network changed
+âœ… Different because network changed
 
 ---
 
-## 🐛 If Something's Wrong
+## ðŸ› If Something's Wrong
 
 ### All IPs still 185.106.28.128?
 1. **Wait 5 minutes** (Render deployment delay)
@@ -163,27 +163,28 @@ Login 2: 94.127.234.12 (Mobile Data)
 
 ---
 
-## 📸 Take Screenshots
+## ðŸ“¸ Take Screenshots
 
 For verification, take screenshots of:
-1. ✅ Admin portal showing different IPs
-2. ✅ Student names in Student/User column
-3. ✅ Login actions with student info
-4. ✅ Different devices showing different IPs
+1. âœ… Admin portal showing different IPs
+2. âœ… Student names in Student/User column
+3. âœ… Login actions with student info
+4. âœ… Different devices showing different IPs
 
 ---
 
-## 🎉 Success Indicators
+## ðŸŽ‰ Success Indicators
 
 You'll know it's working when you see:
 
-✅ **Real IPs**: 78.x.x.x, 192.168.x.x, 10.x.x.x, etc. (NOT all 185.106.28.128)  
-✅ **Student Names**: B12345, B67890, etc. (NOT all "N/A")  
-✅ **Different Devices**: Each device has unique IP  
-✅ **Clear Actions**: "Attendance Login: B12345" (NOT just "Admin Portal Access")  
+âœ… **Real IPs**: 78.x.x.x, 192.168.x.x, 10.x.x.x, etc. (NOT all 185.106.28.128)  
+âœ… **Student Names**: B12345, B67890, etc. (NOT all "N/A")  
+âœ… **Different Devices**: Each device has unique IP  
+âœ… **Clear Actions**: "Attendance Login: B12345" (NOT just "Admin Portal Access")  
 
 ---
 
-**Test now and let me know the results! 🚀**
+**Test now and let me know the results! ðŸš€**
 
 Deployment is live - wait 5 minutes for Render to finish deploying, then start testing!
+

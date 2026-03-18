@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 echo.
 echo ========================================
 echo   SwiftSync - Quick Test Commands
@@ -34,7 +34,7 @@ echo ========================================
 echo   5. OPEN ADMIN DASHBOARD
 echo ========================================
 echo Opening Admin Portal...
-start https://swiftsync-013r.onrender.com/admin-portal?admin_key=emadCyberSoft4SOC
+start https://swiftsync-013r.onrender.com/admin-portal?admin_key=your_secret_admin_key_here
 echo.
 echo ========================================
 echo   NEXT STEPS
@@ -54,3 +54,4 @@ echo   ALL TESTS COMPLETE!
 echo ========================================
 echo.
 pause
+

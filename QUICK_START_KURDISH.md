@@ -1,6 +1,6 @@
-# 🚀 Quick Start Guide - SwiftSync v1.3.5 Kurdish Bot
+﻿# ðŸš€ Quick Start Guide - SwiftSync v1.3.5 Kurdish Bot
 
-## ✅ What Was Fixed
+## âœ… What Was Fixed
 
 1. **Dashboard Loading** - Now properly displays all 55 lectures with subjects
 2. **Telegram Bot** - Upgraded to Kurdish language with dynamic subject info
@@ -8,7 +8,7 @@
 
 ---
 
-## 🎯 How to Run
+## ðŸŽ¯ How to Run
 
 ### Start the Server:
 ```bash
@@ -25,7 +25,7 @@ python test_telegram_kurdish.py
 
 ---
 
-## 📱 What Happens Now
+## ðŸ“± What Happens Now
 
 ### When New Lectures Upload:
 
@@ -35,30 +35,30 @@ python test_telegram_kurdish.py
 
 **Message 1 (Database Design):**
 ```
-📚 هاوڕێیان لێکچەری نوێ داندراوە!
-📙 بابەت: Database Design
-🔄 ژمارە: ٣ لێکچەری نوێ
-📆 بەروار: ٠١/٠٢/٢٠٢٦
-🕓 کاتژمێر: ٠٢:٤٩
+ðŸ“š Ù‡Ø§ÙˆÚ•ÛŽÛŒØ§Ù† Ù„ÛŽÚ©Ú†Û•Ø±ÛŒ Ù†ÙˆÛŽ Ø¯Ø§Ù†Ø¯Ø±Ø§ÙˆÛ•!
+ðŸ“™ Ø¨Ø§Ø¨Û•Øª: Database Design
+ðŸ”„ Ú˜Ù…Ø§Ø±Û•: Ù£ Ù„ÛŽÚ©Ú†Û•Ø±ÛŒ Ù†ÙˆÛŽ
+ðŸ“† Ø¨Û•Ø±ÙˆØ§Ø±: Ù Ù¡/Ù Ù¢/Ù¢Ù Ù¢Ù¦
+ðŸ•“ Ú©Ø§ØªÚ˜Ù…ÛŽØ±: Ù Ù¢:Ù¤Ù©
 ```
 
 **Message 2 (Data Structures):**
 ```
-📚 هاوڕێیان لێکچەری نوێ داندراوە!
-📙 بابەت: Data Structures and Algorithms
-🔄 ژمارە: ٢ لێکچەری نوێ
-📆 بەروار: ٠١/٠٢/٢٠٢٦
-🕓 کاتژمێر: ٠٢:٤٩
+ðŸ“š Ù‡Ø§ÙˆÚ•ÛŽÛŒØ§Ù† Ù„ÛŽÚ©Ú†Û•Ø±ÛŒ Ù†ÙˆÛŽ Ø¯Ø§Ù†Ø¯Ø±Ø§ÙˆÛ•!
+ðŸ“™ Ø¨Ø§Ø¨Û•Øª: Data Structures and Algorithms
+ðŸ”„ Ú˜Ù…Ø§Ø±Û•: Ù¢ Ù„ÛŽÚ©Ú†Û•Ø±ÛŒ Ù†ÙˆÛŽ
+ðŸ“† Ø¨Û•Ø±ÙˆØ§Ø±: Ù Ù¡/Ù Ù¢/Ù¢Ù Ù¢Ù¦
+ðŸ•“ Ú©Ø§ØªÚ˜Ù…ÛŽØ±: Ù Ù¢:Ù¤Ù©
 ```
 
 ---
 
-## 🔍 Dashboard Features
+## ðŸ” Dashboard Features
 
 **Statistics Panel Shows:**
-- 📄 Total Lectures: 55
-- 💾 Storage Used: ~XX MB
-- 📚 Subjects: 9
+- ðŸ“„ Total Lectures: 55
+- ðŸ’¾ Storage Used: ~XX MB
+- ðŸ“š Subjects: 9
 
 **Organized by:**
 1. **Semester** (Fall/Spring)
@@ -67,12 +67,12 @@ python test_telegram_kurdish.py
 
 ---
 
-## 📊 Current Database Status
+## ðŸ“Š Current Database Status
 
 ```
-✅ 55 lectures stored
-✅ 9 subjects tracked
-✅ 2 semesters (Fall + Spring)
+âœ… 55 lectures stored
+âœ… 9 subjects tracked
+âœ… 2 semesters (Fall + Spring)
 
 Subjects Include:
 - Data Structures and Algorithms (17 files)
@@ -88,7 +88,7 @@ Subjects Include:
 
 ---
 
-## 🛠️ Manual Sync
+## ðŸ› ï¸ Manual Sync
 
 ### Via Dashboard:
 1. Open http://localhost:8000
@@ -102,23 +102,23 @@ curl -X POST http://localhost:8000/api/sync-now
 
 ---
 
-## 📝 Key Features
+## ðŸ“ Key Features
 
-### ✅ Kurdish Bot Messages:
-- Native language (هاوڕێیان)
-- Kurdish numerals (٠-٩)
+### âœ… Kurdish Bot Messages:
+- Native language (Ù‡Ø§ÙˆÚ•ÛŽÛŒØ§Ù†)
+- Kurdish numerals (Ù -Ù©)
 - Iraq timezone (Asia/Baghdad)
 - Dynamic subject names
 - Grouped by subject
 
-### ✅ Dashboard:
+### âœ… Dashboard:
 - Clean modern UI
 - Semester organization
 - Subject grouping
 - Search functionality
 - Download/Open buttons
 
-### ✅ Smart Sync:
+### âœ… Smart Sync:
 - Automatic subject detection
 - No duplicate notifications
 - Tracks upload dates
@@ -126,7 +126,7 @@ curl -X POST http://localhost:8000/api/sync-now
 
 ---
 
-## 🎓 Subject Name Mapping
+## ðŸŽ“ Subject Name Mapping
 
 Bot automatically detects and uses exact subject names from portal:
 
@@ -144,15 +144,15 @@ Bot automatically detects and uses exact subject names from portal:
 
 ---
 
-## 🌍 Timezone Info
+## ðŸŒ Timezone Info
 
 **Bot Uses:** Asia/Baghdad (UTC+3)
 **Format:** Kurdish numerals
-**Example:** `٠١/٠٢/٢٠٢٦` at `٠٢:٤٩`
+**Example:** `Ù Ù¡/Ù Ù¢/Ù¢Ù Ù¢Ù¦` at `Ù Ù¢:Ù¤Ù©`
 
 ---
 
-## ⚙️ Configuration
+## âš™ï¸ Configuration
 
 All settings in `.env` file:
 - `TELEGRAM_BOT_TOKEN` - Already configured
@@ -162,7 +162,7 @@ All settings in `.env` file:
 
 ---
 
-## 🧪 Testing Commands
+## ðŸ§ª Testing Commands
 
 ### Test Telegram Bot:
 ```bash
@@ -181,15 +181,15 @@ python -c "import sqlite3; conn = sqlite3.connect('data/lecture_sync.db'); curso
 
 ---
 
-## 📞 Telegram Bot Info
+## ðŸ“ž Telegram Bot Info
 
-**Bot Token:** 8219473970:AAGlDEoRDCV1PMfRgvkrLMmGXiHfCfrzMXQ
-**Group ID:** -1003523536992
-**Status:** ✅ Active
+**Bot Token:** your_telegram_bot_token_here
+**Group ID:** your_telegram_chat_id_here
+**Status:** âœ… Active
 
 ---
 
-## ✅ Verification Checklist
+## âœ… Verification Checklist
 
 - [x] Dashboard loads with 55 lectures
 - [x] Lectures organized by semester and subject
@@ -202,18 +202,18 @@ python -c "import sqlite3; conn = sqlite3.connect('data/lecture_sync.db'); curso
 
 ---
 
-## 🎉 Ready for Production!
+## ðŸŽ‰ Ready for Production!
 
 **Version:** SwiftSync v1.3.5 Kurdish Edition
-**Status:** ✅ All Systems Operational
+**Status:** âœ… All Systems Operational
 **Updated:** February 01, 2026
 
 **Key Improvements:**
-1. ✅ Dashboard properly displays all data
-2. ✅ Telegram bot uses Kurdish language
-3. ✅ Smart grouping by subject
-4. ✅ Accurate date/time/count
-5. ✅ Kurdish numerals support
+1. âœ… Dashboard properly displays all data
+2. âœ… Telegram bot uses Kurdish language
+3. âœ… Smart grouping by subject
+4. âœ… Accurate date/time/count
+5. âœ… Kurdish numerals support
 
 ---
 
@@ -222,4 +222,5 @@ python -c "import sqlite3; conn = sqlite3.connect('data/lecture_sync.db'); curso
 - Check `TELEGRAM_BOT_COMPARISON.md` for message examples
 - Run `python test_telegram_kurdish.py` to test bot
 
-🚀 **Enjoy your upgraded SwiftSync!**
+ðŸš€ **Enjoy your upgraded SwiftSync!**
+

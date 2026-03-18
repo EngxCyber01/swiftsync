@@ -1,40 +1,40 @@
-# 📱 SwiftSync - Quick Reference Card
+﻿# ðŸ“± SwiftSync - Quick Reference Card
 
-## 🔗 Essential URLs
+## ðŸ”— Essential URLs
 
 | Service | URL |
 |---------|-----|
 | **Main App** | https://swiftsync-013r.onrender.com |
-| **Admin Portal** | https://swiftsync-013r.onrender.com/admin-portal?admin_key=emadCyberSoft4SOC |
+| **Admin Portal** | https://swiftsync-013r.onrender.com/admin-portal?admin_key=your_secret_admin_key_here |
 | **Health Check** | https://swiftsync-013r.onrender.com/health |
 
 ---
 
-## 🔐 Login Credentials
+## ðŸ” Login Credentials
 
 ```
 Username: B02052324
-Password: emadXoshnaw1$
-Admin Key: emadCyberSoft4SOC
+Password: your_portal_password_here
+Admin Key: your_secret_admin_key_here
 ```
 
 ---
 
-## 📱 Install PWA on Mobile
+## ðŸ“± Install PWA on Mobile
 
 ### iPhone/iPad:
 1. Open in **Safari**
-2. Tap **Share** (📤)
+2. Tap **Share** (ðŸ“¤)
 3. **Add to Home Screen**
 
 ### Android:
 1. Open in **Chrome**
-2. Tap **Menu** (⋮)
+2. Tap **Menu** (â‹®)
 3. **Install App**
 
 ---
 
-## 🚀 Deploy to Render
+## ðŸš€ Deploy to Render
 
 ### 1. Push Code
 ```bash
@@ -46,11 +46,11 @@ git push origin main
 ### 2. Render Environment Variables
 ```
 PORTAL_USERNAME=B02052324
-PORTAL_PASSWORD=emadXoshnaw1$
-GEMINI_API_KEY=AIzaSyDSmVBPQwOEPL5dq4tXPU7C8acbyjmZag8
-SECRET_ADMIN_KEY=emadCyberSoft4SOC
-TELEGRAM_BOT_TOKEN=8219473970:AAGlDEoRDCV1PMfRgvkrLMmGXiHfCfrzMXQ
-TELEGRAM_CHAT_ID=-1003523536992
+PORTAL_PASSWORD=your_portal_password_here
+GEMINI_API_KEY=your_gemini_api_key_here
+SECRET_ADMIN_KEY=your_secret_admin_key_here
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 BASE_URL=https://swiftsync-013r.onrender.com
 RENDER=true
 ```
@@ -63,7 +63,7 @@ Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
 
 ---
 
-## 🧪 Quick Tests
+## ðŸ§ª Quick Tests
 
 ### Test Health
 ```bash
@@ -83,51 +83,51 @@ curl -X POST https://swiftsync-013r.onrender.com/api/sync-now
 
 ---
 
-## ✅ All Fixed Issues
+## âœ… All Fixed Issues
 
 | Issue | Status |
 |-------|--------|
-| Telegram duplicates on wake-up | ✅ Fixed |
-| Mobile login not working | ✅ Fixed |
-| PWA installation broken | ✅ Fixed |
-| Admin dashboard fake data | ✅ Already real |
-| Environment URLs hardcoded | ✅ Fixed |
+| Telegram duplicates on wake-up | âœ… Fixed |
+| Mobile login not working | âœ… Fixed |
+| PWA installation broken | âœ… Fixed |
+| Admin dashboard fake data | âœ… Already real |
+| Environment URLs hardcoded | âœ… Fixed |
 
 ---
 
-## 🤖 Telegram Bot Behavior
+## ðŸ¤– Telegram Bot Behavior
 
-### ✅ CORRECT (After Fix)
-- New lecture uploaded → ✉️ Notification sent
-- Render wakes up → ⏭️ No notification
-- Re-sync existing → ⏭️ No notification
+### âœ… CORRECT (After Fix)
+- New lecture uploaded â†’ âœ‰ï¸ Notification sent
+- Render wakes up â†’ â­ï¸ No notification
+- Re-sync existing â†’ â­ï¸ No notification
 
-### ❌ WRONG (Before Fix)
-- New lecture uploaded → ✉️ Notification sent
-- Render wakes up → ✉️ Duplicate sent
-- Re-sync existing → ✉️ Duplicates sent
+### âŒ WRONG (Before Fix)
+- New lecture uploaded â†’ âœ‰ï¸ Notification sent
+- Render wakes up â†’ âœ‰ï¸ Duplicate sent
+- Re-sync existing â†’ âœ‰ï¸ Duplicates sent
 
 ---
 
-## 📊 System Status Check
+## ðŸ“Š System Status Check
 
 ### Dashboard Data Sources
-- **Visitor Stats** → Real database queries
-- **Recent Activity** → Live visitor logs
-- **Blocked IPs** → Actual blacklist
-- **Threats** → Real security events
+- **Visitor Stats** â†’ Real database queries
+- **Recent Activity** â†’ Live visitor logs
+- **Blocked IPs** â†’ Actual blacklist
+- **Threats** â†’ Real security events
 
 ### Database Tables
 ```sql
-synced_items (id, filename, last_notified)  ← Prevents duplicates
-visitor_logs (ip, timestamp, action)        ← Real tracking
-blacklist (ip, reason, blocked_at)         ← IP blocking
-threat_logs (ip, threat_type, details)     ← Security
+synced_items (id, filename, last_notified)  â† Prevents duplicates
+visitor_logs (ip, timestamp, action)        â† Real tracking
+blacklist (ip, reason, blocked_at)         â† IP blocking
+threat_logs (ip, threat_type, details)     â† Security
 ```
 
 ---
 
-## 🔧 Troubleshooting
+## ðŸ”§ Troubleshooting
 
 ### Mobile Login Fails
 - Clear browser cache
@@ -151,11 +151,11 @@ threat_logs (ip, threat_type, details)     ← Security
 
 ---
 
-## 📞 Emergency Commands
+## ðŸ“ž Emergency Commands
 
 ### Restart Server (Render)
 ```
-Dashboard → Manual Deploy
+Dashboard â†’ Manual Deploy
 ```
 
 ### Clear Notification Cache
@@ -166,19 +166,19 @@ sqlite3 data/lecture_sync.db "UPDATE synced_items SET last_notified = NULL"
 
 ### Check Logs
 ```
-Render Dashboard → Logs Tab
+Render Dashboard â†’ Logs Tab
 ```
 
 ---
 
-## 🎯 Success Indicators
+## ðŸŽ¯ Success Indicators
 
-✅ Health endpoint returns OK  
-✅ Login works on mobile  
-✅ PWA installs successfully  
-✅ Admin shows visitor data  
-✅ Telegram sends 1 message per lecture  
-✅ No duplicates after wake-up  
+âœ… Health endpoint returns OK  
+âœ… Login works on mobile  
+âœ… PWA installs successfully  
+âœ… Admin shows visitor data  
+âœ… Telegram sends 1 message per lecture  
+âœ… No duplicates after wake-up  
 
 ---
 
@@ -186,4 +186,5 @@ Render Dashboard → Logs Tab
 
 **Full Guide:** See [DEPLOYMENT_FIXED.md](DEPLOYMENT_FIXED.md)
 
-**Status:** ✅ **ALL SYSTEMS OPERATIONAL**
+**Status:** âœ… **ALL SYSTEMS OPERATIONAL**
+

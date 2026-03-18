@@ -1,6 +1,6 @@
-# ✅ SwiftSync - New Features Implemented
+﻿# âœ… SwiftSync - New Features Implemented
 
-## 🎨 1. Professional Admin Dashboard Design
+## ðŸŽ¨ 1. Professional Admin Dashboard Design
 
 The admin dashboard has been completely redesigned with a professional, less colorful theme:
 
@@ -13,42 +13,42 @@ The admin dashboard has been completely redesigned with a professional, less col
 
 ### Access:
 ```
-http://localhost:8000/admin-portal?admin_key=emadCyberSoft4SOC
+http://localhost:8000/admin-portal?admin_key=your_secret_admin_key_here
 ```
 
 ---
 
-## 📱 2. Telegram Bot Notifications
+## ðŸ“± 2. Telegram Bot Notifications
 
 Automatic notifications sent to your Telegram group when new lectures are uploaded!
 
 ### Configuration:
-- **Bot Token**: `8219473970:AAGlDEoRDCV1PMfRgvkrLMmGXiHfCfrzMXQ`
-- **Group ID**: `-1003523536992`
+- **Bot Token**: `your_telegram_bot_token_here`
+- **Group ID**: `your_telegram_chat_id_here`
 
 ### Features:
-✅ **Single Lecture Notification** - Sent when 1 lecture is uploaded
+âœ… **Single Lecture Notification** - Sent when 1 lecture is uploaded
 ```
-📚 *New Lecture Uploaded!*
+ðŸ“š *New Lecture Uploaded!*
 
-🎓 *Course:* Computer Science
-📖 *Lecture:* Introduction to Python
-👨‍🏫 *Instructor:* Prof. Name
-📅 *Date:* January 21, 2026 at 03:30 PM
+ðŸŽ“ *Course:* Computer Science
+ðŸ“– *Lecture:* Introduction to Python
+ðŸ‘¨â€ðŸ« *Instructor:* Prof. Name
+ðŸ“… *Date:* January 21, 2026 at 03:30 PM
 
-🚀 Stay focused and happy learning!
-🔗 Watch here: http://localhost:8000/files/lecture.pdf
+ðŸš€ Stay focused and happy learning!
+ðŸ”— Watch here: http://localhost:8000/files/lecture.pdf
 ```
 
-✅ **Multiple Lectures Notification** - Sent when 2+ lectures are uploaded
+âœ… **Multiple Lectures Notification** - Sent when 2+ lectures are uploaded
 ```
-📚 *Multiple New Lectures Uploaded!*
+ðŸ“š *Multiple New Lectures Uploaded!*
 
-🎓 *Count:* 5 new lectures
-📅 *Date:* January 21, 2026 at 03:30 PM
+ðŸŽ“ *Count:* 5 new lectures
+ðŸ“… *Date:* January 21, 2026 at 03:30 PM
 
-🚀 Stay focused and happy learning!
-💪 Keep up the great work!
+ðŸš€ Stay focused and happy learning!
+ðŸ’ª Keep up the great work!
 ```
 
 ### How It Works:
@@ -66,21 +66,21 @@ This will send a test message to verify the connection.
 
 ---
 
-## 🎬 3. Smooth Typewriter Animation
+## ðŸŽ¬ 3. Smooth Typewriter Animation
 
 The Kurdish text animation has been enhanced:
 
 ### New Features:
-✅ **Emojis appear at the end** - After text is fully typed
-✅ **Smoother animation** - 80ms typing speed
-✅ **Default emoji colors** - Native Unicode appearance
-✅ **Works for both texts**:
-   - Kurdish Sorani: ڕۆژئاوا ڕۆژهەڵاتە، کوردستان یەک وڵاتە ❤️🌤️💚
-   - Latin: Rojava Rojhilat e, Kurdistan yek welat e ❤️🌤️💚
+âœ… **Emojis appear at the end** - After text is fully typed
+âœ… **Smoother animation** - 80ms typing speed
+âœ… **Default emoji colors** - Native Unicode appearance
+âœ… **Works for both texts**:
+   - Kurdish Sorani: Ú•Û†Ú˜Ø¦Ø§ÙˆØ§ Ú•Û†Ú˜Ù‡Û•ÚµØ§ØªÛ•ØŒ Ú©ÙˆØ±Ø¯Ø³ØªØ§Ù† ÛŒÛ•Ú© ÙˆÚµØ§ØªÛ• â¤ï¸ðŸŒ¤ï¸ðŸ’š
+   - Latin: Rojava Rojhilat e, Kurdistan yek welat e â¤ï¸ðŸŒ¤ï¸ðŸ’š
 
 ---
 
-## 🔧 Implementation Files
+## ðŸ”§ Implementation Files
 
 ### New Files Created:
 1. **`telegram_notifier.py`** - Telegram bot integration
@@ -104,7 +104,7 @@ The Kurdish text animation has been enhanced:
 
 ---
 
-## 🚀 Usage Guide
+## ðŸš€ Usage Guide
 
 ### For Students:
 1. Join the Telegram group (use the Group ID provided)
@@ -126,12 +126,12 @@ POST http://localhost:8000/api/sync-now
 GET http://localhost:8000/health
 
 # Admin portal
-GET http://localhost:8000/admin-portal?admin_key=emadCyberSoft4SOC
+GET http://localhost:8000/admin-portal?admin_key=your_secret_admin_key_here
 ```
 
 ---
 
-## 📝 Telegram Message Format
+## ðŸ“ Telegram Message Format
 
 The bot uses **Markdown formatting** for beautiful messages:
 - `*Bold text*` for titles and important info
@@ -148,7 +148,7 @@ Edit `telegram_notifier.py` to customize:
 
 ---
 
-## ✨ Benefits
+## âœ¨ Benefits
 
 ### 1. **Immediate Notifications**
 Students don't need to constantly check the portal - they get notified instantly!
@@ -164,7 +164,7 @@ System can handle multiple lectures and notify large groups efficiently.
 
 ---
 
-## 🔒 Security Notes
+## ðŸ”’ Security Notes
 
 - Telegram bot token is embedded in code (for development)
 - For production, move to environment variables:
@@ -178,7 +178,7 @@ System can handle multiple lectures and notify large groups efficiently.
 
 ---
 
-## 🐛 Troubleshooting
+## ðŸ› Troubleshooting
 
 ### Telegram Notifications Not Working?
 1. Check bot token is correct
@@ -199,7 +199,7 @@ System can handle multiple lectures and notify large groups efficiently.
 
 ---
 
-## 📞 Support
+## ðŸ“ž Support
 
 For issues or questions:
 1. Check application logs
@@ -209,17 +209,18 @@ For issues or questions:
 
 ---
 
-## 🎉 Summary
+## ðŸŽ‰ Summary
 
 All requested features have been successfully implemented:
 
-✅ Professional admin dashboard with subdued colors  
-✅ Telegram bot integration with beautiful notifications  
-✅ Smooth typewriter animation with emojis at the end  
-✅ Automatic notifications when new lectures are uploaded  
-✅ Scalable and maintainable code structure  
+âœ… Professional admin dashboard with subdued colors  
+âœ… Telegram bot integration with beautiful notifications  
+âœ… Smooth typewriter animation with emojis at the end  
+âœ… Automatic notifications when new lectures are uploaded  
+âœ… Scalable and maintainable code structure  
 
 **Server running at:** `http://localhost:8000`  
-**Admin portal:** `http://localhost:8000/admin-portal?admin_key=emadCyberSoft4SOC`
+**Admin portal:** `http://localhost:8000/admin-portal?admin_key=your_secret_admin_key_here`
 
-Enjoy your enhanced SwiftSync system! 🚀
+Enjoy your enhanced SwiftSync system! ðŸš€
+

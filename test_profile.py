@@ -1,4 +1,4 @@
-"""Test extracting name from attendance page"""
+﻿"""Test extracting name from attendance page"""
 import requests
 from bs4 import BeautifulSoup
 from auth import AuthClient, AuthConfig
@@ -7,7 +7,7 @@ import re
 # Login
 config = AuthConfig()
 config.username = "B02052324"
-config.password = "emadXoshnaw1$"
+config.password = "your_portal_password_here"
 client = AuthClient(config)
 client.login()
 
@@ -44,3 +44,4 @@ print("\n=== Headers/Titles ===")
 for tag in ['h1', 'h2', 'h3', 'title']:
     for elem in soup.find_all(tag):
         print(f"{tag}: {elem.get_text(strip=True)}")
+
