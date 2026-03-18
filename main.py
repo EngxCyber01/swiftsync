@@ -6103,7 +6103,7 @@ async def dashboard() -> HTMLResponse:
                 return false;
             }}
 
-            async function apiFetchJson(url, options = {{}}, retries = 2, timeoutMs = 12000) {{
+            async function apiFetchJson(url, options = {{}}, retries = 2, timeoutMs = 20000) {{
                 for (let attempt = 0; attempt <= retries; attempt++) {{
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -6133,6 +6133,13 @@ async def dashboard() -> HTMLResponse:
                         return await response.json();
                     }} catch (err) {{
                         clearTimeout(timer);
+                        if (err && (err.name === 'AbortError' || String(err.message || '').toLowerCase().includes('aborted'))) {{
+                            if (attempt < retries) {{
+                                await new Promise(r => setTimeout(r, 350 * (attempt + 1)));
+                                continue;
+                            }}
+                            throw new Error('Network timeout. Please check your connection and try again.');
+                        }}
                         if (attempt < retries) {{
                             await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
                             continue;
@@ -6363,7 +6370,7 @@ async def dashboard() -> HTMLResponse:
                         const files = subjects[subject];
                         
                         html += `
-                            <div class="subject-section" style="margin-left: 1rem; margin-bottom: 1rem;">
+                            <div class="subject-section" style="margin: 0 1rem 1rem 1rem;">
                                 <div class="subject-header" onclick="toggleSubject(this)">
                                     <div class="subject-title">
                                         <i class="fas fa-book"></i>
@@ -7044,7 +7051,7 @@ async def dashboard() -> HTMLResponse:
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Authenticating...</span>';
                 
                 try {{
-                    var result = await apiFetchJson(`/api/attendance/login?username=${{encodeURIComponent(username)}}&password=${{encodeURIComponent(password)}}`, {{ method: 'POST' }}, 1, 12000);
+                    var result = await apiFetchJson(`/api/attendance/login?username=${{encodeURIComponent(username)}}&password=${{encodeURIComponent(password)}}`, {{ method: 'POST' }}, 1, 25000);
                     
                     if (result.success) {{
                         // Save session token
@@ -7703,7 +7710,7 @@ async def dashboard() -> HTMLResponse:
                     const semesterResults = resultsBySemester[semesterDisplayName];
                     
                     htmlContent += `
-                        <div class="subject-section" style="margin-bottom: 1.5rem;">
+                        <div class="subject-section" style="margin: 0 1rem 1.5rem 1rem;">
                             <div class="subject-header" onclick="toggleResultsSemester(this)" style="background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%); cursor: pointer;">
                                 <div class="subject-title" style="color: white; font-size: 1.1rem; font-weight: 700;">
                                     <i class="fas fa-graduation-cap" style="color: white;"></i>
@@ -8032,7 +8039,7 @@ async def dashboard() -> HTMLResponse:
                     const semesterResults = resultsBySemester[semesterKey];
                     
                     htmlContent += `
-                        <div class="subject-section" style="margin-bottom: 1.5rem;">
+                        <div class="subject-section" style="margin: 0 1rem 1.5rem 1rem;">
                             <div class="subject-header" onclick="toggleResultsSemester(this)" style="background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%); cursor: pointer;">
                                 <div class="subject-title" style="color: white; font-weight: 700;">
                                     <i class="fas fa-calendar-alt" style="color: white;"></i>
