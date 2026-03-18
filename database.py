@@ -4,6 +4,7 @@ Handles visitor logging and IP blacklist management
 """
 import sqlite3
 import os
+import html
 from datetime import datetime
 import pytz
 from pathlib import Path
@@ -14,6 +15,13 @@ DB_PATH = Path("data") / "lecture_sync.db"
 
 # Ensure data directory exists
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _safe_text(value) -> str:
+    """Return HTML-escaped text for safe rendering in admin templates."""
+    if value is None:
+        return ""
+    return html.escape(str(value), quote=True)
 
 
 def init_security_tables():
@@ -132,12 +140,12 @@ def get_recent_visitors(limit: int = 100) -> List[Dict]:
         return [
             {
                 "id": row[0],
-                "ip_address": row[1],
-                "timestamp": row[2],
-                "action": row[3],
-                "user_agent": row[4],
-                "path": row[5],
-                "username": row[6] if row[6] else "N/A"
+                "ip_address": _safe_text(row[1]),
+                "timestamp": _safe_text(row[2]),
+                "action": _safe_text(row[3]),
+                "user_agent": _safe_text(row[4]),
+                "path": _safe_text(row[5]),
+                "username": _safe_text(row[6] if row[6] else "N/A")
             }
             for row in rows
         ]
@@ -157,9 +165,9 @@ def get_blocked_ips() -> List[Dict]:
         return [
             {
                 "id": row[0],
-                "ip_address": row[1],
-                "reason": row[2],
-                "blocked_at": row[3]
+                "ip_address": _safe_text(row[1]),
+                "reason": _safe_text(row[2]),
+                "blocked_at": _safe_text(row[3])
             }
             for row in rows
         ]
@@ -419,11 +427,11 @@ def get_threat_logs(limit: int = 50) -> List[Dict]:
         rows = cursor.fetchall()
         return [
             {
-                "ip_address": row[0],
-                "threat_type": row[1],
-                "details": row[2],
-                "detected_at": row[3],
-                "action_taken": row[4]
+                "ip_address": _safe_text(row[0]),
+                "threat_type": _safe_text(row[1]),
+                "details": _safe_text(row[2]),
+                "detected_at": _safe_text(row[3]),
+                "action_taken": _safe_text(row[4])
             }
             for row in rows
         ]

@@ -3,6 +3,7 @@ import hmac
 import logging
 import os
 import sqlite3
+import time
 import requests
 from datetime import datetime
 from pathlib import Path
@@ -136,6 +137,9 @@ def get_real_client_ip(request: Request) -> str:
 
 
 ALLOW_QUERY_SESSION_TOKEN = os.getenv("ALLOW_QUERY_SESSION_TOKEN", "true").strip().lower() in {"1", "true", "yes"}
+RATE_LIMIT_SYNC_PER_MINUTE = int(os.getenv("RATE_LIMIT_SYNC_PER_MINUTE", "6"))
+RATE_LIMIT_SUMMARY_PER_MINUTE = int(os.getenv("RATE_LIMIT_SUMMARY_PER_MINUTE", "30"))
+_rate_limiter_store = {}
 
 
 def _resolve_session_token(request: Request, query_session_token: str = None) -> str:
@@ -146,6 +150,20 @@ def _resolve_session_token(request: Request, query_session_token: str = None) ->
     if ALLOW_QUERY_SESSION_TOKEN and query_session_token and query_session_token.strip():
         return query_session_token.strip()
     return ""
+
+
+def _is_rate_limited(client_ip: str, scope: str, max_requests: int, window_seconds: int = 60) -> bool:
+    """Simple in-memory sliding-window limiter to protect expensive endpoints."""
+    now = time.monotonic()
+    key = f"{client_ip}:{scope}"
+    timestamps = _rate_limiter_store.get(key, [])
+    valid_after = now - window_seconds
+    timestamps = [ts for ts in timestamps if ts >= valid_after]
+    limited = len(timestamps) >= max_requests
+    if not limited:
+        timestamps.append(now)
+    _rate_limiter_store[key] = timestamps
+    return limited
 
 
 # Security Middleware - IP Blocking
@@ -396,9 +414,16 @@ async def get_service_worker():
 
 
 @app.post("/api/sync-now")
-async def manual_sync() -> JSONResponse:
+async def manual_sync(request: Request) -> JSONResponse:
     """Trigger immediate sync (for testing)"""
     try:
+        client_ip = get_real_client_ip(request)
+        if _is_rate_limited(client_ip, "sync-now", RATE_LIMIT_SYNC_PER_MINUTE):
+            return JSONResponse({
+                "success": False,
+                "error": "Too many sync requests. Please wait and try again."
+            }, status_code=429)
+
         added, files, new_item_ids, subject_map = await asyncio.to_thread(sync_once, auth_client, send_notifications=True)
         
         # Send Telegram notifications ONLY for items that haven't been notified yet
@@ -681,7 +706,7 @@ async def download_file(filename: str, request: Request, _: str = None):
 
 
 @app.post("/api/summarize")
-async def summarize_lecture(filename: str) -> JSONResponse:
+async def summarize_lecture(request: Request, filename: str) -> JSONResponse:
     """
     Summarize a single lecture PDF
     
@@ -689,6 +714,13 @@ async def summarize_lecture(filename: str) -> JSONResponse:
         filename: Name of the PDF file to summarize
     """
     try:
+        client_ip = get_real_client_ip(request)
+        if _is_rate_limited(client_ip, "summarize-single", RATE_LIMIT_SUMMARY_PER_MINUTE):
+            return JSONResponse({
+                "success": False,
+                "error": "Too many summarize requests. Please wait and try again."
+            }, status_code=429)
+
         # Validate file exists
         file_path = DOWNLOAD_DIR / filename
         
@@ -728,7 +760,7 @@ async def summarize_lecture(filename: str) -> JSONResponse:
 
 
 @app.post("/api/summarize-all")
-async def summarize_subject(subject: str) -> JSONResponse:
+async def summarize_subject(request: Request, subject: str) -> JSONResponse:
     """
     Summarize all lectures in a subject
     
@@ -736,6 +768,13 @@ async def summarize_subject(subject: str) -> JSONResponse:
         subject: Name of the subject
     """
     try:
+        client_ip = get_real_client_ip(request)
+        if _is_rate_limited(client_ip, "summarize-all", RATE_LIMIT_SUMMARY_PER_MINUTE):
+            return JSONResponse({
+                "success": False,
+                "error": "Too many summarize requests. Please wait and try again."
+            }, status_code=429)
+
         import sqlite3
         
         # Get all files for this subject
