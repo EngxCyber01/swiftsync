@@ -3202,14 +3202,14 @@ async def dashboard() -> HTMLResponse:
         
         <!-- PERFORMANCE: Preload critical resources -->
         <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" as="style">
-        <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" as="style">
+        <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=Outfit:wght@400;500;600;700;800&display=swap" as="style">
         
         <!-- Preload critical resources for instant display -->
         <link rel="preload" href="/static/icons/icon-192x192.png?v={logo_version}" as="image">
         
         <!-- Load CSS -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
         <style>
             /* ========================================
                PERFORMANCE OPTIMIZATIONS
@@ -3363,6 +3363,11 @@ async def dashboard() -> HTMLResponse:
                 --kurdish-red: #DC143C;
                 --kurdish-green: #228B22;
                 --kurdish-yellow: #FFD700;
+                --radius-lg: 20px;
+                --radius-md: 14px;
+                --radius-sm: 10px;
+                --shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.25);
+                --shadow-accent: 0 18px 50px rgba(0, 217, 255, 0.18);
             }}
             
             body {{ 
@@ -3389,6 +3394,11 @@ async def dashboard() -> HTMLResponse:
             body {{
                 -webkit-font-smoothing: antialiased;
                 -moz-osx-font-smoothing: grayscale;
+            }}
+
+            h1, h2, h3, .stat-value, .subject-title, .login-header h2, .attendance-header h2, .modal-title {{
+                font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+                letter-spacing: -0.01em;
             }}
             
             /* Allow text selection for copying */
@@ -3436,13 +3446,14 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                padding: 1.5rem 0;
-                margin-bottom: 3rem;
+                padding: 1.25rem 1.75rem;
+                margin-bottom: 2.5rem;
                 background: rgba(22, 33, 62, 0.6);
                 backdrop-filter: blur(5px);
-                border-radius: 15px;
-                padding: 1.5rem 2rem;
+                border-radius: var(--radius-lg);
                 border: 1px solid rgba(34, 211, 238, 0.35);
+                box-shadow: var(--shadow-soft);
+                gap: 1.5rem;
             }}
             
             .logo {{
@@ -3452,9 +3463,9 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .logo-icon {{
-                width: 60px;
-                height: 60px;
-                border-radius: 18px;
+                width: 56px;
+                height: 56px;
+                border-radius: 16px;
                 overflow: hidden;
                 position: relative;
                 display: flex;
@@ -3489,7 +3500,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .logo-text h1 {{
-                font-size: 1.5rem;
+                font-size: 1.45rem;
                 font-weight: 900;
                 background: linear-gradient(135deg, #22d3ee 0%, #38bdf8 40%, #a5f3fc 80%, #e5e7eb 100%);
                 -webkit-background-clip: text;
@@ -3505,7 +3516,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .logo-text p {{
-                font-size: 0.75rem;
+                font-size: 0.72rem;
                             background: linear-gradient(90deg, #22d3ee 0%, #2dd4bf 50%, #4ade80 100%);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
@@ -3516,11 +3527,11 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .year-badge {{
-                padding: 0.5rem 1rem;
+                padding: 0.45rem 0.95rem;
                 background: rgba(0, 217, 255, 0.15);
                 border: 1px solid rgba(0, 217, 255, 0.3);
-                border-radius: 8px;
-                font-size: 0.875rem;
+                border-radius: 10px;
+                font-size: 0.85rem;
                 font-weight: 600;
                 color: #00d9ff;
                 backdrop-filter: blur(10px);
@@ -3617,13 +3628,13 @@ async def dashboard() -> HTMLResponse:
             
             .nav-actions {{
                 display: flex;
-                gap: 0.75rem;
+                gap: 0.6rem;
                 align-items: center;
             }}
             
             /* Kurdish Text Animation (in navbar) - Fixed size to prevent layout shift */
             .kurdish-text {{
-                font-size: 1.1rem;
+                font-size: 1rem;
                 font-weight: 500;
                 color: rgba(255, 255, 255, 0.95);
                 letter-spacing: 0.03em;
@@ -3632,9 +3643,9 @@ async def dashboard() -> HTMLResponse:
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
-                width: 380px;
-                height: 32px;
-                min-height: 32px;
+                width: 320px;
+                height: 30px;
+                min-height: 30px;
                 text-align: center;
                 display: flex;
                 align-items: center;
@@ -3659,15 +3670,15 @@ async def dashboard() -> HTMLResponse:
             .stats {{
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                gap: 1.5rem;
-                margin-bottom: 3rem;
+                gap: 1.25rem;
+                margin-bottom: 2.5rem;
             }}
             
             .stat-card {{
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 20px;
-                padding: 2rem;
+                border-radius: var(--radius-lg);
+                padding: 1.75rem;
                 position: relative;
                 overflow: hidden;
                 transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -3686,25 +3697,25 @@ async def dashboard() -> HTMLResponse:
             .stat-card:hover {{
                 transform: translateY(-5px);
                 border-color: var(--accent);
-                box-shadow: 0 20px 60px rgba(0, 217, 255, 0.2);
+                box-shadow: var(--shadow-accent);
             }}
             
             .stat-header {{
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                margin-bottom: 1.5rem;
+                margin-bottom: 1.2rem;
             }}
             
             .stat-icon {{
-                width: 45px;
-                height: 45px;
+                width: 42px;
+                height: 42px;
                 background: var(--glass);
-                border-radius: 12px;
+                border-radius: var(--radius-sm);
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                font-size: 1.3rem;
+                font-size: 1.2rem;
             }}
             
             .stat-card:nth-child(1) .stat-icon {{ color: var(--accent); }}
@@ -3720,7 +3731,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .stat-value {{
-                font-size: 2.5rem;
+                font-size: 2.2rem;
                 font-weight: 900;
                 background: linear-gradient(135deg, var(--text-primary), var(--text-secondary));
                 -webkit-background-clip: text;
@@ -3731,7 +3742,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .stat-label {{
-                font-size: 0.85rem;
+                font-size: 0.8rem;
                 color: var(--text-tertiary);
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
@@ -3742,9 +3753,9 @@ async def dashboard() -> HTMLResponse:
             .toolbar {{
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 20px;
-                padding: 1.5rem;
-                margin-bottom: 2rem;
+                border-radius: var(--radius-lg);
+                padding: 1.25rem;
+                margin-bottom: 1.75rem;
                 display: flex;
                 gap: 1rem;
                 align-items: center;
@@ -3759,12 +3770,12 @@ async def dashboard() -> HTMLResponse:
             
             .search-box input {{
                 width: 100%;
-                padding: 1rem 1rem 1rem 3rem;
+                padding: 0.95rem 1rem 0.95rem 3rem;
                 background: var(--bg-tertiary);
                 border: 1px solid var(--border);
-                border-radius: 12px;
+                border-radius: var(--radius-md);
                 color: var(--text-primary);
-                font-size: 0.95rem;
+                font-size: 0.92rem;
                 font-weight: 500;
                 transition: all 0.3s;
                 caret-color: var(--accent);
@@ -3794,14 +3805,14 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .sync-btn {{
-                padding: 1rem 2rem;
+                padding: 0.9rem 1.7rem;
                 background: linear-gradient(135deg, var(--accent), var(--success));
                 color: var(--bg-primary);
                 border: none;
-                border-radius: 12px;
+                border-radius: var(--radius-md);
                 cursor: pointer;
                 font-weight: 700;
-                font-size: 0.9rem;
+                font-size: 0.88rem;
                 transition: all 0.1s ease-out;  /* ULTRA FAST response */
                 display: flex;
                 align-items: center;
@@ -3852,11 +3863,11 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 align-items: center;
                 gap: 0.5rem;
-                padding: 0.75rem 1.25rem;
+                padding: 0.65rem 1.1rem;
                 background: var(--glass);
                 border: 1px solid var(--border);
                 border-radius: 50px;
-                font-size: 0.85rem;
+                font-size: 0.82rem;
                 color: var(--text-secondary);
                 backdrop-filter: blur(10px);
             }}
@@ -3869,7 +3880,7 @@ async def dashboard() -> HTMLResponse:
             .subject-section {{
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 20px;
+                border-radius: var(--radius-lg);
                 margin-bottom: 1.5rem;
                 overflow: hidden;
                 transition: all 0.3s ease;
@@ -3883,7 +3894,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .subject-header {{
-                padding: 1.5rem 2rem;
+                padding: 1.25rem 1.6rem;
                 background: var(--bg-tertiary);
                 cursor: pointer;
                 display: flex;
@@ -3912,10 +3923,12 @@ async def dashboard() -> HTMLResponse:
             .subject-title {{
                 display: flex;
                 align-items: center;
-                gap: 1rem;
-                font-size: 1.1rem;
+                gap: 0.85rem;
+                font-size: 1.02rem;
                 font-weight: 700;
                 color: var(--text-primary);
+                line-height: 1.35;
+                flex-wrap: wrap;
             }}
             
             .subject-title i {{
@@ -3924,20 +3937,21 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .file-count {{
-                font-size: 0.8rem;
+                font-size: 0.78rem;
                 color: var(--text-tertiary);
                 background: var(--glass);
-                padding: 0.35rem 0.85rem;
+                padding: 0.3rem 0.75rem;
                 border-radius: 50px;
                 margin-left: 0.75rem;
+                white-space: nowrap;
             }}
             
             .collapse-btn {{
-                width: 40px;
-                height: 40px;
+                width: 36px;
+                height: 36px;
                 background: var(--glass);
                 border: 1px solid var(--border);
-                border-radius: 10px;
+                border-radius: var(--radius-sm);
                 color: var(--accent);
                 cursor: pointer;
                 display: flex;
@@ -3973,7 +3987,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .subject-files {{
-                padding: 1.5rem;
+                padding: 1.25rem;
                 display: none;
             }}
             
@@ -3981,11 +3995,11 @@ async def dashboard() -> HTMLResponse:
             .file-item {{
                 display: flex;
                 align-items: center;
-                gap: 1.5rem;
-                padding: 1.5rem;
+                gap: 1.25rem;
+                padding: 1.25rem;
                 background: var(--bg-tertiary);
                 border: 1px solid var(--border);
-                border-radius: 16px;
+                border-radius: var(--radius-md);
                 margin-bottom: 1rem;
                 transition: all 0.2s ease;
                 position: relative;
@@ -4003,13 +4017,13 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .file-icon {{
-                width: 55px;
-                height: 55px;
+                width: 52px;
+                height: 52px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                border-radius: 12px;
-                font-size: 1.5rem;
+                border-radius: var(--radius-sm);
+                font-size: 1.35rem;
                 flex-shrink: 0;
             }}
             
@@ -4043,6 +4057,10 @@ async def dashboard() -> HTMLResponse:
                 line-height: 1.4;
                 user-select: text;
                 cursor: text;
+                display: -webkit-box;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
             }}
             
             .file-meta {{
@@ -4057,7 +4075,7 @@ async def dashboard() -> HTMLResponse:
                 padding: 0.5rem 1rem;
                 background: var(--glass);
                 border: 1px solid var(--border);
-                border-radius: 8px;
+                border-radius: var(--radius-sm);
                 font-size: 0.85rem;
                 font-weight: 600;
                 color: var(--text-secondary);
@@ -4069,10 +4087,10 @@ async def dashboard() -> HTMLResponse:
                 background: linear-gradient(135deg, #8b5cf6, #6366f1);
                 color: white;
                 border: none;
-                border-radius: 10px;
+                border-radius: var(--radius-sm);
                 cursor: pointer !important;
                 font-weight: 700;
-                font-size: 0.85rem;
+                font-size: 0.83rem;
                 transition: all 0.15s ease-out;
                 text-decoration: none !important;
                 display: inline-flex;
@@ -4100,10 +4118,10 @@ async def dashboard() -> HTMLResponse:
                 background: linear-gradient(135deg, var(--accent), var(--success));
                 color: var(--bg-primary);
                 border: none;
-                border-radius: 10px;
+                border-radius: var(--radius-sm);
                 cursor: pointer !important;
                 font-weight: 700;
-                font-size: 0.85rem;
+                font-size: 0.83rem;
                 transition: all 0.15s ease-out;
                 text-decoration: none !important;
                 display: inline-flex;
@@ -4131,10 +4149,10 @@ async def dashboard() -> HTMLResponse:
                 background: linear-gradient(135deg, #DC143C 0%, #ff6b6b 100%);
                 color: white;
                 border: none;
-                border-radius: 10px;
+                border-radius: var(--radius-sm);
                 cursor: pointer !important;
                 font-weight: 700;
-                font-size: 0.85rem;
+                font-size: 0.83rem;
                 transition: all 0.15s ease-out;
                 display: inline-flex;
                 align-items: center;
@@ -4169,10 +4187,10 @@ async def dashboard() -> HTMLResponse:
                 background: linear-gradient(135deg, #FFD700 0%, #2ea043 100%);
                 color: #0f172a;
                 border: none;
-                border-radius: 12px;
+                border-radius: var(--radius-md);
                 cursor: pointer !important;
                 font-weight: 700;
-                font-size: 0.9rem;
+                font-size: 0.88rem;
                 transition: all 0.15s ease-out;
                 display: flex;
                 align-items: center;
@@ -4227,7 +4245,7 @@ async def dashboard() -> HTMLResponse:
             .modal-content {{
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 20px;
+                border-radius: var(--radius-lg);
                 max-width: 800px;
                 width: 100%;
                 max-height: 90vh;
@@ -4243,7 +4261,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .modal-header {{
-                padding: 2rem;
+                padding: 1.75rem;
                 border-bottom: 1px solid var(--border);
                 display: flex;
                 align-items: center;
@@ -4280,7 +4298,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .modal-body {{
-                padding: 2rem;
+                padding: 1.75rem;
                 overflow-y: auto;
                 flex: 1;
             }}
@@ -4437,22 +4455,22 @@ async def dashboard() -> HTMLResponse:
             
             .zone-tabs {{
                 display: flex;
-                gap: 1rem;
-                margin-bottom: 2rem;
-                padding: 0.4rem;
+                gap: 0.75rem;
+                margin-bottom: 1.6rem;
+                padding: 0.35rem;
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 20px;
+                border-radius: var(--radius-lg);
             }}
             
             .zone-tab {{
                 flex: 1;
-                padding: 0.9rem 1.6rem;
+                padding: 0.75rem 1.2rem;
                 background: transparent;
                 border: none;
-                border-radius: 15px;
+                border-radius: var(--radius-md);
                 color: var(--text-secondary);
-                font-size: 0.98rem;
+                font-size: 0.92rem;
                 font-weight: 600;
                 display: flex;
                 align-items: center;
@@ -4461,6 +4479,7 @@ async def dashboard() -> HTMLResponse:
                 cursor: pointer;
                 transition: all 0.3s ease;
                 position: relative;
+                min-height: 48px;
             }}
 
             .zone-tab:not(.active) {{
@@ -4485,7 +4504,7 @@ async def dashboard() -> HTMLResponse:
             .zone-tab.active {{
                 background: linear-gradient(135deg, var(--accent), var(--success));
                 color: white;
-                box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
+                box-shadow: 0 10px 25px rgba(0, 217, 255, 0.25);
             }}
 
             .zone-tab.active .tab-meta {{
@@ -4493,7 +4512,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .zone-tab i {{
-                font-size: 1.2rem;
+                font-size: 1.1rem;
             }}
             
             .zone-content {{
@@ -4510,22 +4529,22 @@ async def dashboard() -> HTMLResponse:
             
             .private-subtabs {{
                 display: flex;
-                gap: 1rem;
-                margin-bottom: 2rem;
-                padding: 0.5rem;
+                gap: 0.75rem;
+                margin-bottom: 1.5rem;
+                padding: 0.4rem;
                 background: var(--bg-tertiary);
                 border: 1px solid var(--border);
-                border-radius: 15px;
+                border-radius: var(--radius-lg);
             }}
             
             .private-subtab {{
                 flex: 1;
-                padding: 0.875rem 1.5rem;
+                padding: 0.7rem 1.1rem;
                 background: transparent;
                 border: none;
-                border-radius: 12px;
+                border-radius: var(--radius-md);
                 color: var(--text-secondary);
-                font-size: 0.95rem;
+                font-size: 0.9rem;
                 font-weight: 600;
                 display: flex;
                 align-items: center;
@@ -4533,6 +4552,7 @@ async def dashboard() -> HTMLResponse:
                 gap: 0.5rem;
                 cursor: pointer;
                 transition: all 0.3s ease;
+                min-height: 46px;
             }}
             
             .private-subtab:hover {{
@@ -4543,11 +4563,11 @@ async def dashboard() -> HTMLResponse:
             .private-subtab.active {{
                 background: linear-gradient(135deg, var(--accent), var(--success));
                 color: white;
-                box-shadow: 0 8px 20px rgba(0, 217, 255, 0.25);
+                box-shadow: 0 8px 18px rgba(0, 217, 255, 0.22);
             }}
             
             .private-subtab i {{
-                font-size: 1.1rem;
+                font-size: 1rem;
             }}
             
             .private-section {{
@@ -4565,25 +4585,25 @@ async def dashboard() -> HTMLResponse:
             
             .attendance-login-card {{
                 max-width: 500px;
-                margin: 4rem auto;
+                margin: 3rem auto;
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 25px;
-                padding: 3rem;
-                box-shadow: 0 20px 60px rgba(0, 217, 255, 0.1);
+                border-radius: 22px;
+                padding: 2.5rem;
+                box-shadow: var(--shadow-soft);
             }}
             
             .login-header {{
                 text-align: center;
-                margin-bottom: 2.5rem;
+                margin-bottom: 2rem;
             }}
             
             .login-icon {{
-                width: 80px;
-                height: 80px;
+                width: 72px;
+                height: 72px;
                 margin: 0 auto 1.5rem;
                 background: linear-gradient(135deg, var(--accent), var(--success));
-                border-radius: 20px;
+                border-radius: 18px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -4593,7 +4613,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .login-header h2 {{
-                font-size: 1.75rem;
+                font-size: 1.6rem;
                 font-weight: 700;
                 color: var(--text-primary);
                 margin-bottom: 0.5rem;
@@ -4601,47 +4621,47 @@ async def dashboard() -> HTMLResponse:
             
             .login-header p {{
                 color: var(--text-tertiary);
-                font-size: 0.95rem;
+                font-size: 0.9rem;
             }}
             
             .form-group {{
-                margin-bottom: 1.5rem;
+                margin-bottom: 1.25rem;
             }}
             
             .form-group label {{
                 display: flex;
                 align-items: center;
                 gap: 0.5rem;
-                margin-bottom: 0.5rem;
+                margin-bottom: 0.45rem;
                 color: var(--text-secondary);
-                font-size: 0.9rem;
+                font-size: 0.85rem;
                 font-weight: 600;
             }}
             
             .form-group input {{
                 width: 100%;
-                padding: 1rem;
+                padding: 0.9rem 1rem;
                 background: var(--bg-primary);
                 border: 1px solid var(--border);
-                border-radius: 12px;
+                border-radius: var(--radius-md);
                 color: var(--text-primary);
-                font-size: 1rem;
+                font-size: 0.95rem;
                 transition: all 0.3s ease;
             }}
             
             .form-group input:focus {{
                 border-color: var(--accent);
-                box-shadow: 0 0 0 3px var(--accent-glow);
+                box-shadow: 0 0 0 3px rgba(0, 217, 255, 0.2);
             }}
             
             .login-submit-btn {{
                 width: 100%;
-                padding: 1rem;
+                padding: 0.95rem;
                 background: linear-gradient(135deg, var(--accent), var(--success));
                 border: none;
-                border-radius: 12px;
+                border-radius: var(--radius-md);
                 color: white;
-                font-size: 1rem;
+                font-size: 0.95rem;
                 font-weight: 700;
                 display: flex;
                 align-items: center;
@@ -4649,7 +4669,7 @@ async def dashboard() -> HTMLResponse:
                 gap: 0.75rem;
                 cursor: pointer;
                 transition: all 0.3s ease;
-                margin-bottom: 1rem;
+                margin-bottom: 0.85rem;
             }}
             
             .login-submit-btn:hover {{
@@ -4668,11 +4688,11 @@ async def dashboard() -> HTMLResponse:
             
             .login-note {{
                 text-align: center;
-                padding: 1rem;
+                padding: 0.85rem 1rem;
                 background: var(--glass);
-                border-radius: 10px;
+                border-radius: var(--radius-sm);
                 color: var(--text-tertiary);
-                font-size: 0.85rem;
+                font-size: 0.8rem;
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -4687,9 +4707,9 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 align-items: center;
                 gap: 0.5rem;
-                margin-bottom: 1.5rem;
+                margin-bottom: 1.1rem;
                 color: var(--text-secondary);
-                font-size: 0.9rem;
+                font-size: 0.85rem;
                 cursor: pointer;
                 user-select: none;
             }}
@@ -4709,13 +4729,13 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                margin-bottom: 2rem;
-                padding-bottom: 1rem;
+                margin-bottom: 1.5rem;
+                padding-bottom: 0.85rem;
                 border-bottom: 1px solid var(--border);
             }}
             
             .attendance-header h2 {{
-                font-size: 1.5rem;
+                font-size: 1.35rem;
                 font-weight: 700;
                 color: var(--text-primary);
                 display: flex;
@@ -4724,12 +4744,12 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .logout-btn {{
-                padding: 0.75rem 1.5rem;
+                padding: 0.6rem 1.1rem;
                 background: var(--glass);
                 border: 1px solid var(--border);
-                border-radius: 12px;
+                border-radius: var(--radius-md);
                 color: var(--text-secondary);
-                font-size: 0.9rem;
+                font-size: 0.85rem;
                 font-weight: 600;
                 display: flex;
                 align-items: center;
@@ -4752,8 +4772,8 @@ async def dashboard() -> HTMLResponse:
             .attendance-card {{
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 20px;
-                padding: 2rem;
+                border-radius: var(--radius-lg);
+                padding: 1.75rem;
                 margin-bottom: 1.5rem;
                 transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
                 position: relative;
@@ -4773,15 +4793,15 @@ async def dashboard() -> HTMLResponse:
             .attendance-card:hover {{
                 transform: translateY(-3px);
                 border-color: var(--accent);
-                box-shadow: 0 15px 50px rgba(0, 217, 255, 0.15);
+                box-shadow: var(--shadow-accent);
             }}
             
             .attendance-card-header {{
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                margin-bottom: 1.5rem;
-                padding-bottom: 1rem;
+                margin-bottom: 1.25rem;
+                padding-bottom: 0.85rem;
                 border-bottom: 1px solid var(--border);
             }}
             
@@ -4790,7 +4810,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .module-name {{
-                font-size: 1.25rem;
+                font-size: 1.15rem;
                 font-weight: 700;
                 color: var(--text-primary);
                 margin-bottom: 0.5rem;
@@ -4824,7 +4844,7 @@ async def dashboard() -> HTMLResponse:
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
-                border-radius: 15px;
+                border-radius: var(--radius-md);
                 font-weight: 700;
             }}
             
@@ -4917,22 +4937,22 @@ async def dashboard() -> HTMLResponse:
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
                 gap: 1rem;
-                margin-bottom: 2rem;
-                padding: 1.5rem;
+                margin-bottom: 1.5rem;
+                padding: 1.25rem;
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 20px;
+                border-radius: var(--radius-lg);
             }}
             
             .stat-item {{
                 text-align: center;
-                padding: 1rem;
+                padding: 0.9rem;
                 background: var(--glass);
-                border-radius: 12px;
+                border-radius: var(--radius-md);
             }}
             
             .stat-item-value {{
-                font-size: 2rem;
+                font-size: 1.9rem;
                 font-weight: 700;
                 color: var(--accent);
                 margin-bottom: 0.5rem;
@@ -5009,16 +5029,16 @@ async def dashboard() -> HTMLResponse:
             .results-table-container {{
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 20px;
+                border-radius: var(--radius-lg);
                 overflow: hidden;
-                margin-top: 2rem;
+                margin-top: 1.5rem;
                 box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
             }}
             
             .results-table {{
                 width: 100%;
                 border-collapse: collapse;
-                font-size: 0.95rem;
+                font-size: 0.92rem;
             }}
             
             .results-table thead {{
@@ -5027,11 +5047,11 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .results-table thead th {{
-                padding: 1rem;
+                padding: 0.9rem 1rem;
                 text-align: left;
                 color: var(--text-primary);
                 font-weight: 700;
-                font-size: 0.9rem;
+                font-size: 0.82rem;
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
                 white-space: nowrap;
@@ -5054,7 +5074,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .results-table tbody td {{
-                padding: 1rem;
+                padding: 0.85rem 1rem;
                 color: var(--text-secondary);
                 vertical-align: middle;
             }}
@@ -5260,13 +5280,13 @@ async def dashboard() -> HTMLResponse:
             /* Notification System - Top Smooth */
             .notification {{
                 position: fixed;
-                top: -100px;
+                top: -90px;
                 left: 50%;
                 transform: translateX(-50%);
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
-                border-radius: 12px;
-                padding: 1rem 2rem;
+                border-radius: var(--radius-md);
+                padding: 0.9rem 1.6rem;
                 display: flex;
                 align-items: center;
                 gap: 0.75rem;
@@ -5305,7 +5325,7 @@ async def dashboard() -> HTMLResponse:
             .notification span {{
                 color: var(--text-primary);
                 font-weight: 600;
-                font-size: 1rem;
+                font-size: 0.92rem;
             }}
             
             /* Responsive */
@@ -5324,12 +5344,14 @@ async def dashboard() -> HTMLResponse:
                 .modal-header {{ padding: 1.5rem; }}
                 .modal-body {{ padding: 1.5rem; }}
                 
-                .zone-tabs {{ flex-direction: column; gap: 0.35rem; margin-bottom: 1.25rem; padding: 0.35rem; }}
-                .zone-tab {{ padding: 0.6rem 1rem; font-size: 0.9rem; border-radius: 12px; gap: 0.45rem; }}
-                .zone-tab i {{ font-size: 1rem; }}
+                .zone-tabs {{ flex-direction: column; gap: 0.35rem; margin-bottom: 1.1rem; padding: 0.3rem; border-radius: 16px; }}
+                .zone-tab {{ padding: 0.55rem 0.9rem; font-size: 0.88rem; border-radius: 12px; gap: 0.45rem; min-height: 44px; }}
+                .zone-tab i {{ font-size: 0.95rem; }}
                 .zone-tab .tab-meta {{ font-size: 0.72rem; }}
-                .attendance-login-card {{ padding: 2rem 1.5rem; }}
+                .attendance-login-card {{ padding: 1.75rem 1.25rem; margin: 2.5rem auto; }}
                 .attendance-header {{ flex-direction: column; gap: 1rem; align-items: flex-start; }}
+                .private-subtabs {{ gap: 0.5rem; padding: 0.3rem; border-radius: 16px; }}
+                .private-subtab {{ padding: 0.55rem 0.85rem; font-size: 0.85rem; min-height: 42px; }}
                 
                 /* Mobile-specific: Subject sections - better spacing */
                 .subject-section {{
@@ -5404,6 +5426,7 @@ async def dashboard() -> HTMLResponse:
                     line-height: 1.5;
                     margin-bottom: 0.75rem;
                     word-break: break-word;
+                    -webkit-line-clamp: 3;
                 }}
                 
                 .file-meta {{
@@ -5441,8 +5464,8 @@ async def dashboard() -> HTMLResponse:
                 
                 /* Mobile-specific: Attendance section - better spacing and readability */
                 .attendance-card {{
-                    padding: 1.5rem 1rem;
-                    margin-bottom: 1.25rem;
+                    padding: 1.4rem 1rem;
+                    margin-bottom: 1.2rem;
                     border-radius: 16px;
                 }}
                 
@@ -5530,7 +5553,7 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 .stat-item-value {{
-                    font-size: 2.25rem;
+                    font-size: 2.1rem;
                     margin-bottom: 0.6rem;
                 }}
                 
@@ -6450,8 +6473,8 @@ async def dashboard() -> HTMLResponse:
             
             // Restore last active zone on page load (default to lectures)
             window.addEventListener('load', () => {{
-                const lastZone = localStorage.getItem('lastActiveZone');
-                const lastPrivateSection = localStorage.getItem('lastPrivateSection');
+                const lastZone = safeStorage.getItem('lastActiveZone');
+                const lastPrivateSection = safeStorage.getItem('lastPrivateSection');
                 
                 // Always default to lectures unless explicitly on private
                 if (lastZone && lastZone === 'private') {{
@@ -6753,11 +6776,11 @@ async def dashboard() -> HTMLResponse:
                 if (zone === 'lectures') {{
                     document.getElementById('lecturesTab').classList.add('active');
                     document.getElementById('lecturesZone').classList.add('active');
-                    localStorage.setItem('lastActiveZone', 'lectures');
+                    safeStorage.setItem('lastActiveZone', 'lectures');
                 }} else if (zone === 'private') {{
                     document.getElementById('privateTab').classList.add('active');
                     document.getElementById('privateZone').classList.add('active');
-                    localStorage.setItem('lastActiveZone', 'private');
+                    safeStorage.setItem('lastActiveZone', 'private');
                     
                     // Check if user has a saved session
                     checkAttendanceSession();
@@ -6773,11 +6796,11 @@ async def dashboard() -> HTMLResponse:
                 if (section === 'attendance') {{
                     document.getElementById('attendanceSubtab').classList.add('active');
                     document.getElementById('attendanceSection').classList.add('active');
-                    localStorage.setItem('lastPrivateSection', 'attendance');
+                    safeStorage.setItem('lastPrivateSection', 'attendance');
                 }} else if (section === 'result-alerts') {{
                     document.getElementById('resultAlertsSubtab').classList.add('active');
                     document.getElementById('resultAlertsSection').classList.add('active');
-                    localStorage.setItem('lastPrivateSection', 'result-alerts');
+                    safeStorage.setItem('lastPrivateSection', 'result-alerts');
                     
                     // Load result alerts - use cache if available
                     if (attendanceSessionToken) {{
@@ -6804,7 +6827,7 @@ async def dashboard() -> HTMLResponse:
                 }} else if (section === 'official-results') {{
                     document.getElementById('officialResultsSubtab').classList.add('active');
                     document.getElementById('officialResultsSection').classList.add('active');
-                    localStorage.setItem('lastPrivateSection', 'official-results');
+                    safeStorage.setItem('lastPrivateSection', 'official-results');
                     
                     // Load official results - use cache if available
                     if (attendanceSessionToken) {{
@@ -6978,7 +7001,11 @@ async def dashboard() -> HTMLResponse:
                         // Save credentials if remember me is checked (encrypted)
                         if (rememberMe) {{
                             const creds = btoa(JSON.stringify({{ u: username, p: password }}));
-                            safeStorage.setItem('attendance_credentials', creds);
+                            const savedOk = safeStorage.setItem('attendance_credentials', creds);
+                            if (!savedOk && !window.__storageWarningShown) {{
+                                window.__storageWarningShown = true;
+                                showNotification('Saved login is unavailable on this browser. You can still log in normally.', 'error');
+                            }}
                         }} else {{
                             safeStorage.removeItem('attendance_credentials');
                         }}
@@ -7001,7 +7028,7 @@ async def dashboard() -> HTMLResponse:
                         document.getElementById('privateDataArea').style.display = 'block';
 
                         // Restore last private section (attendance, result-alerts, or official-results)
-                        const lastPrivateSection = localStorage.getItem('lastPrivateSection');
+                        const lastPrivateSection = safeStorage.getItem('lastPrivateSection');
                         if (lastPrivateSection === 'result-alerts') {{
                             switchPrivateSection('result-alerts');
                         }} else if (lastPrivateSection === 'official-results') {{
@@ -7241,7 +7268,7 @@ async def dashboard() -> HTMLResponse:
                     document.getElementById('privateDataArea').style.display = 'block';
                     
                     // Restore last private section (attendance, result-alerts, or official-results)
-                    const lastPrivateSection = localStorage.getItem('lastPrivateSection');
+                    const lastPrivateSection = safeStorage.getItem('lastPrivateSection');
                     if (lastPrivateSection && !silentRefresh) {{
                         // Delay slightly to ensure DOM is ready
                         setTimeout(() => {{
