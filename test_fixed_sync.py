@@ -9,8 +9,10 @@ logging.basicConfig(level=logging.INFO)
 
 print("Testing sync with fixed logic...\n")
 auth = AuthClient(AuthConfig())
-count, files = sync_once(auth)
+count, files, new_ids, subject_map = sync_once(auth)
 
 print(f"\nSync result: {count} new files")
 if files:
     print(f"   First 5 files: {[f.name for f in files[:5]]}")
+if subject_map:
+    print(f"   Subjects: {list(set(subject_map.values()))}")

@@ -452,12 +452,162 @@ def has_threat_log(ip_address: str) -> bool:
         return False
 
 
+# ===================================
+# RESULTS STORAGE FUNCTIONS
+# ===================================
+
+def init_results_table():
+    """Initialize results table for storing student exam/quiz results"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        
+        # Create results table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id TEXT NOT NULL,
+                notification_id TEXT UNIQUE NOT NULL,
+                subject TEXT,
+                exam_type TEXT,
+                score TEXT,
+                grade TEXT,
+                semester TEXT,
+                status TEXT,
+                raw_text TEXT NOT NULL,
+                exam_date TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        
+        # Create indexes for faster lookups
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_results_student 
+            ON results(student_id)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_results_notification 
+            ON results(notification_id)
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_results_created 
+            ON results(created_at DESC)
+        """)
+        
+        conn.commit()
+
+
+def save_result(student_id: str, notification_id: str, parsed_data: Dict) -> bool:
+    """
+    Save a result to database. Uses notification_id for deduplication.
+    Returns True if saved, False if duplicate (already exists)
+    """
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            now = datetime.now(pytz.timezone('Asia/Baghdad')).isoformat()
+            
+            cursor.execute("""
+                INSERT OR IGNORE INTO results 
+                (student_id, notification_id, subject, exam_type, score, grade, 
+                 semester, status, raw_text, exam_date, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                student_id,
+                notification_id,
+                parsed_data.get('subject'),
+                parsed_data.get('exam_type'),
+                parsed_data.get('score'),
+                parsed_data.get('grade'),
+                parsed_data.get('semester'),
+                parsed_data.get('status'),
+                parsed_data.get('raw_text', ''),
+                parsed_data.get('exam_date'),
+                now,
+                now
+            ))
+            
+            # Check if row was actually inserted (not duplicate)
+            return cursor.rowcount > 0
+    except Exception as e:
+        print(f"Error saving result: {e}")
+        return False
+
+
+def get_student_results(student_id: str, limit: int = 100) -> List[Dict]:
+    """
+    Get all results for a student, ordered by date (newest first)
+    """
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT * FROM results 
+                WHERE student_id = ? 
+                ORDER BY created_at DESC 
+                LIMIT ?
+            """, (student_id, limit))
+            
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"Error getting student results: {e}")
+        return []
+
+
+def result_exists(notification_id: str, student_id: str = None) -> bool:
+    """
+    Check if a result with this notification_id already exists for this student
+    If student_id is provided, check for that specific student
+    If student_id is None, check globally (backwards compatibility)
+    """
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            if student_id:
+                cursor.execute("""
+                    SELECT 1 FROM results 
+                    WHERE notification_id = ? AND student_id = ? 
+                    LIMIT 1
+                """, (notification_id, student_id))
+            else:
+                cursor.execute("""
+                    SELECT 1 FROM results WHERE notification_id = ? LIMIT 1
+                """, (notification_id,))
+            return cursor.fetchone() is not None
+    except Exception as e:
+        print(f"Error checking result existence: {e}")
+        return False
+
+
+def get_all_results_count() -> int:
+    """Get total number of results stored"""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM results")
+            return cursor.fetchone()[0]
+    except Exception as e:
+        print(f"Error counting results: {e}")
+        return 0
+
+
 # Initialize tables on import
 try:
     init_security_tables()
     print("✓ Security tables initialized successfully")
 except Exception as e:
     print(f"Error initializing security tables: {e}")
+
+try:
+    init_results_table()
+    print("✓ Results table initialized successfully")
+except Exception as e:
+    print(f"Error initializing results table: {e}")
 
 
 def detect_path_traversal(path: str) -> bool:

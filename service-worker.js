@@ -1,6 +1,6 @@
 // SwiftSync Service Worker - PWA Support (PERFORMANCE OPTIMIZED + SECURITY FIX)
-const CACHE_NAME = 'swiftsync-v1.4.0-security-fix';
-const RUNTIME_CACHE = 'swiftsync-runtime-v1.4.0';
+const CACHE_NAME = 'swiftsync-v1.4.17-logo-refresh';
+const RUNTIME_CACHE = 'swiftsync-runtime-v1.4.17';
 
 // Core assets to cache immediately for INSTANT offline loading
 const CORE_ASSETS = [
@@ -14,7 +14,7 @@ const CORE_ASSETS = [
 
 // Install event - cache core assets FAST
 self.addEventListener('install', (event) => {
-  console.log('[Service Worker] Installing v1.3.0 with session persistence fix...');
+  console.log('[SW] Installing service worker v1.4.17-logo-refresh...');
   
   event.waitUntil(
     caches.open(CACHE_NAME)

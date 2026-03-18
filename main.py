@@ -2,22 +2,25 @@ import asyncio
 import logging
 import os
 import sqlite3
+import requests
 from datetime import datetime
 from pathlib import Path
 from typing import List
 from contextlib import asynccontextmanager
+from bs4 import BeautifulSoup
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Header, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from auth import AuthClient, AuthConfig, AuthError
-from sync import DOWNLOAD_DIR, SYNC_INTERVAL_SECONDS, sync_once, _was_notified, _mark_notified
+from sync import DOWNLOAD_DIR, SYNC_INTERVAL_SECONDS, sync_once, _was_notified, _mark_notified, _get_semester_from_subject
 from summarizer import summarize_single_lecture, summarize_all_lectures, SummarizationError
 from attendance import attendance_service
+from results import results_service
 import database as db
 from telegram_notifier import notify_new_lecture, notify_multiple_lectures
 
@@ -89,6 +92,15 @@ app.mount("/files", StaticFiles(directory=DOWNLOAD_DIR, html=False), name="files
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory="static", html=False), name="static")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> FileResponse:
+    """Serve favicon.ico from the static directory so /favicon.ico works."""
+    favicon_path = static_dir / "favicon.ico"
+    if favicon_path.is_file():
+        return FileResponse(favicon_path)
+    raise HTTPException(status_code=404, detail="Favicon not found")
 
 
 def get_real_client_ip(request: Request) -> str:
@@ -285,7 +297,7 @@ async def sync_worker() -> None:
     while True:
         try:
             logger.info("Checking for new lectures...")
-            added, files, new_item_ids = await asyncio.to_thread(sync_once, auth_client, send_notifications=True)
+            added, files, new_item_ids, subject_map = await asyncio.to_thread(sync_once, auth_client, send_notifications=True)
             
             if new_item_ids:
                 logger.info("✅ Synced %s new file(s), sending notifications for %s NEW items", added, len(new_item_ids))
@@ -293,14 +305,26 @@ async def sync_worker() -> None:
                 # Send Telegram notifications ONLY for items not yet notified
                 try:
                     if len(new_item_ids) == 1 and files:
-                        notify_new_lecture(files[0], base_url=BASE_URL)
+                        # Get subject for single lecture
+                        subject = subject_map.get(new_item_ids[0], "بابەتی جیاواز")
+                        notify_new_lecture(files[0], subject=subject, base_url=BASE_URL)
                         _mark_notified(new_item_ids[0])
-                        logger.info(f"✅ Telegram notification sent for 1 lecture (ID: {new_item_ids[0]})")
+                        logger.info(f"✅ Telegram notification sent for 1 lecture (ID: {new_item_ids[0]}, Subject: {subject})")
                     elif len(new_item_ids) > 1:
-                        notify_multiple_lectures(len(new_item_ids))
+                        # Group lectures by subject
+                        subjects_count = {}
+                        for item_id in new_item_ids:
+                            subject = subject_map.get(item_id, "بابەتی جیاواز")
+                            subjects_count[subject] = subjects_count.get(subject, 0) + 1
+                        
+                        # Send notification for each subject with multiple lectures
+                        for subject, count in subjects_count.items():
+                            notify_multiple_lectures(count, subject=subject)
+                            logger.info(f"✅ Telegram notification sent for {count} lectures in {subject}")
+                        
+                        # Mark all as notified
                         for item_id in new_item_ids:
                             _mark_notified(item_id)
-                        logger.info(f"✅ Telegram notification sent for {len(new_item_ids)} lectures (IDs: {new_item_ids})")
                 except Exception as e:
                     logger.error(f"❌ Failed to send Telegram notification: {e}")
             else:
@@ -356,7 +380,7 @@ async def get_service_worker():
 async def manual_sync() -> JSONResponse:
     """Trigger immediate sync (for testing)"""
     try:
-        added, files, new_item_ids = await asyncio.to_thread(sync_once, auth_client, send_notifications=True)
+        added, files, new_item_ids, subject_map = await asyncio.to_thread(sync_once, auth_client, send_notifications=True)
         
         # Send Telegram notifications ONLY for items that haven't been notified yet
         notifications_sent = 0
@@ -364,17 +388,27 @@ async def manual_sync() -> JSONResponse:
             try:
                 if len(new_item_ids) == 1 and files:
                     # Single lecture notification
-                    notify_new_lecture(files[0], base_url=BASE_URL)
+                    subject = subject_map.get(new_item_ids[0], "بابەتی جیاواز")
+                    notify_new_lecture(files[0], subject=subject, base_url=BASE_URL)
                     _mark_notified(new_item_ids[0])
                     notifications_sent = 1
-                    logger.info(f"✅ Manual sync: Telegram sent for 1 lecture (ID: {new_item_ids[0]})")
+                    logger.info(f"✅ Manual sync: Telegram sent for 1 lecture (ID: {new_item_ids[0]}, Subject: {subject})")
                 elif len(new_item_ids) > 1:
-                    # Multiple lectures notification
-                    notify_multiple_lectures(len(new_item_ids))
+                    # Group lectures by subject
+                    subjects_count = {}
+                    for item_id in new_item_ids:
+                        subject = subject_map.get(item_id, "بابەتی جیاواز")
+                        subjects_count[subject] = subjects_count.get(subject, 0) + 1
+                    
+                    # Send notification for each subject with multiple lectures
+                    for subject, count in subjects_count.items():
+                        notify_multiple_lectures(count, subject=subject)
+                        logger.info(f"✅ Manual sync: Telegram sent for {count} lectures in {subject}")
+                    
+                    # Mark all as notified
                     for item_id in new_item_ids:
                         _mark_notified(item_id)
                     notifications_sent = len(new_item_ids)
-                    logger.info(f"✅ Manual sync: Telegram sent for {notifications_sent} lectures (IDs: {new_item_ids})")
             except Exception as e:
                 logger.error(f"❌ Manual sync: Failed to send Telegram notification: {e}")
         
@@ -433,14 +467,55 @@ async def upload_data(package: bytes = None) -> JSONResponse:
         }, status_code=500)
 
 
+def _infer_subject_from_filename(filename: str):
+    """Best-effort subject guess from the lecture filename.
+
+    This is used when the sync database doesn't yet have a subject
+    (for example, if the portal HTML changed or a fallback path ran).
+    It tries to avoid putting files into the generic "Other" bucket
+    when we can reasonably match them to a known subject.
+    """
+    name = filename.lower()
+
+    subject_keywords = {
+        "Data Communication": ["data communication"],
+        "Database Design": ["database design", "db design"],
+        "Numerical Analysis and Probability": ["numerical analysis", "probability"],
+        "Object Oriented Programming": ["object oriented programming", "oop"],
+        "Software Design and Modelling with UML": ["software design", "uml"],
+        "Combinatorics and Graph Theory": ["combinatorics", "graph theory"],
+        "Database Principles": ["database principles"],
+        "Data Structures and Algorithms": ["data structures", "algorithms"],
+        "Mathematics III": ["mathematics iii", "math iii", "math 3"],
+        "Software Engineering Principles": ["software engineering"],
+        "Introduction to OOP": ["introduction to oop", "intro to oop"],
+    }
+
+    for subject, keywords in subject_keywords.items():
+        for kw in keywords:
+            if kw in name:
+                return subject
+    return None
+
+
+def _infer_semester_from_filename(filename: str) -> str:
+    """Infer semester from filename when DB metadata is missing."""
+    name = filename.lower()
+    if "fall semester" in name or " fall " in f" {name} ":
+        return "Fall Semester"
+    if "spring semester" in name or " spring " in f" {name} ":
+        return "Spring Semester"
+    return ""
+
+
 @app.get("/api/files")
 async def list_files() -> JSONResponse:
     """List all files grouped by semester and subject"""
     import sqlite3
     from pathlib import Path
-    
+
     files_by_semester = {}
-    
+
     # Try to get subject, semester information and upload dates from database
     db_path = Path(__file__).parent / "data" / "lecture_sync.db"
     if db_path.exists():
@@ -453,35 +528,54 @@ async def list_files() -> JSONResponse:
             db_info = {}
     else:
         db_info = {}
-    
+
     # List all files
     if DOWNLOAD_DIR.exists():
         for path in sorted(DOWNLOAD_DIR.iterdir()):
             if path.is_file():
                 stat = path.stat()
                 file_db_info = db_info.get(path.name, {})
-                subject = file_db_info.get("subject") or "Other"
-                semester = file_db_info.get("semester") or "Spring Semester"
-                
+
+                # Prefer subject from DB, otherwise try to infer from filename
+                subject = file_db_info.get("subject")
+                if not subject:
+                    subject = _infer_subject_from_filename(path.name)
+                if not subject:
+                    subject = "Other"
+
+                # Prefer semester from DB, otherwise derive from subject (if known)
+                semester = file_db_info.get("semester")
+                inferred_semester = _infer_semester_from_filename(path.name)
+                if inferred_semester:
+                    semester = inferred_semester
+                if not semester:
+                    if subject and subject != "Other":
+                        try:
+                            semester = _get_semester_from_subject(subject)
+                        except Exception:
+                            semester = "Spring Semester"
+                    else:
+                        semester = "Spring Semester"
+
                 # Use upload_date from database if available, otherwise fall back to file modified time
                 upload_date = file_db_info.get("upload_date")
                 if not upload_date:
                     upload_date = datetime.fromtimestamp(stat.st_mtime).isoformat()
-                
+
                 file_info = {
                     "name": path.name,
                     "size_bytes": stat.st_size,
                     "modified": upload_date,  # This is now the original upload date from the portal
                     "url": f"/files/{path.name}",
                 }
-                
+
                 # Group by semester first, then by subject
                 if semester not in files_by_semester:
                     files_by_semester[semester] = {}
                 if subject not in files_by_semester[semester]:
                     files_by_semester[semester][subject] = []
                 files_by_semester[semester][subject].append(file_info)
-    
+
     logger.info(f"📊 API returning {len(files_by_semester)} semesters with total {sum(sum(len(files) for files in subjects.values()) for subjects in files_by_semester.values())} files")
     return JSONResponse(files_by_semester)
 
@@ -846,12 +940,986 @@ async def get_profile(request: Request, session_token: str = None) -> JSONRespon
         }, status_code=500)
 
 
+@app.get("/api/results/data")
+async def get_results(request: Request, session_token: str = None) -> JSONResponse:
+    """
+    Fetch results data for authenticated user
+    Uses notification API as source for results
+    Requires valid session token from attendance login
+    
+    Android Fix: Accepts session_token from query param OR cookie
+    """
+    try:
+        # ANDROID FIX: Try cookie if query param is missing or empty
+        if not session_token or session_token.strip() == "":
+            session_token = request.cookies.get("session_token")
+            if session_token:
+                logger.info("Using session token from cookie (Android fallback)")
+        
+        if not session_token or session_token.strip() == "":
+            return JSONResponse({
+                "success": False,
+                "error": "Session token required. Please login first."
+            }, status_code=401)
+        
+        client_ip = get_real_client_ip(request)
+        logger.info("Fetching results for session token: %s from IP: %s", session_token[:20], client_ip)
+        
+        # Use attendance service's session manager to validate session
+        result = await results_service.get_results(session_token, attendance_service.session_manager)
+        logger.info("Results fetch: success=%s, count=%s", result.get('success'), result.get('total_count', 0))
+        
+        if result['success']:
+            return JSONResponse({
+                "success": True,
+                "results": result['results'],
+                "total_count": result.get('total_count', 0)
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "error": result.get('error', 'Failed to fetch results'),
+                "results": []
+            }, status_code=401 if 'expired' in result.get('error', '').lower() else 403)
+    
+    except Exception as exc:
+        logger.exception("Error fetching results data: %s", str(exc))
+        return JSONResponse({
+            "success": False,
+            "error": f"Error fetching results: {str(exc)}",
+            "results": []
+        }, status_code=500)
+
+
+@app.get("/api/official-results/data")
+async def get_official_results(request: Request, session_token: str = None) -> JSONResponse:
+    """
+    Fetch official results from StudentResult endpoint for authenticated user
+    Uses official StudentResult/List API endpoint
+    Requires valid session token from attendance login
+    
+    Security: Only returns results for the authenticated student's ID
+    Android Fix: Accepts session_token from query param OR cookie
+    """
+    try:
+        # ANDROID FIX: Try cookie if query param is missing or empty
+        if not session_token or session_token.strip() == "":
+            session_token = request.cookies.get("session_token")
+            if session_token:
+                logger.info("Using session token from cookie (Android fallback)")
+        
+        if not session_token or session_token.strip() == "":
+            return JSONResponse({
+                "success": False,
+                "error": "Session token required. Please login first."
+            }, status_code=401)
+        
+        client_ip = get_real_client_ip(request)
+        logger.info("Fetching official results for session token: %s from IP: %s", session_token[:20], client_ip)
+        
+        # Validate session using attendance service's session manager
+        session = attendance_service.session_manager.get_session(session_token)
+        
+        if not session:
+            return JSONResponse({
+                "success": False,
+                "error": "Session expired or invalid. Please login again."
+            }, status_code=401)
+        
+        # Get student ID from session (this is the authenticated user's ID)
+        student_id = session.get('student_id', '')
+        cookies = session.get('cookies', {})
+        
+        if not student_id:
+            return JSONResponse({
+                "success": False,
+                "error": "Student ID not found in session."
+            }, status_code=400)
+        
+        # Sanitize student_id to prevent injection
+        student_id = str(student_id).strip()
+        if not student_id.isalnum() and not all(c.isalnum() or c in ['-', '_'] for c in student_id):
+            return JSONResponse({
+                "success": False,
+                "error": "Invalid student ID format."
+            }, status_code=400)
+        
+        logger.info("Fetching official results for student ID: %s", student_id)
+        
+        # Fetch results from official endpoint
+        official_endpoint = f"https://tempapp-su.awrosoft.com/University/StudentResult/List?studentId={student_id}"
+        
+        def fetch_official_results():
+            """Fetch official results from StudentResult endpoint"""
+            try:
+                response = requests.get(
+                    official_endpoint,
+                    cookies=cookies,
+                    timeout=15,
+                    headers={
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept': 'application/json, text/html, */*',
+                        'Referer': 'https://tempapp-su.awrosoft.com/'
+                    }
+                )
+                
+                if response.status_code == 401:
+                    return {
+                        'success': False,
+                        'error': 'Unauthorized. Session may have expired.',
+                        'results': []
+                    }
+                
+                if response.status_code != 200:
+                    return {
+                        'success': False,
+                        'error': f'Failed to fetch results. Status code: {response.status_code}',
+                        'results': []
+                    }
+                
+                # Parse response (HTML or JSON)
+                try:
+                    content_type = response.headers.get('Content-Type', '')
+                    response_text = response.text
+                    
+                    # Log response details for debugging
+                    logger.info(f"Response Content-Type: {content_type}")
+                    logger.info(f"Response length: {len(response_text)} bytes")
+                    
+                    # Check if response is HTML (the API returns HTML formatted results)
+                    if 'text/html' in content_type or response_text.strip().startswith('<'):
+                        logger.info("Received HTML response - parsing HTML results")
+                        
+                        # Parse HTML to extract results
+                        soup = BeautifulSoup(response_text, 'html.parser')
+                        
+                        # Find all result cards (each card = one semester)
+                        result_cards = soup.find_all('div', class_='card')
+                        results = []
+                        best_by_key = {}  # (year, semester, title_lower) -> result dict
+                        
+                        for card in result_cards:
+                            try:
+                                # Extract header info (Academic Year and Semester)
+                                card_header = card.find('div', class_='card-header')
+                                if not card_header:
+                                    continue
+                                    
+                                header_text = card_header.get_text(strip=True)
+                                logger.info(f"Parsing card header: {header_text}")
+                                
+                                # Parse header to extract academic year and semester
+                                # Common formats:
+                                # - "Result of 2025"
+                                # - "2024-2025 Fall Semester"  
+                                # - "2024-2025 - Fall Semester"
+                                # - "Spring Semester 2024-2025"
+                                # IMPORTANT: Do not default to a specific semester/year.
+                                # If parsing fails, we will preserve the portal's raw header label to avoid mis-grouping.
+                                academic_year = ""
+                                semester_name = ""
+                                semester_label = (header_text or '').strip()
+                                
+                                if header_text:
+                                    import re
+                                    
+                                    # Extract year pattern (2024-2025 or just 2025)
+                                    year_pattern = re.search(r'(\d{4})\s*-?\s*(\d{4})', header_text)
+                                    if year_pattern:
+                                        academic_year = f"{year_pattern.group(1)}-{year_pattern.group(2)}"
+                                    elif 'result of' in header_text.lower():
+                                        # Handle "Result of 2025" format
+                                        single_year_match = re.search(r'result\s+of\s+(\d{4})', header_text, re.IGNORECASE)
+                                        if single_year_match:
+                                            year = int(single_year_match.group(1))
+                                            academic_year = f"{year-1}-{year}"
+
+                                    # If year wasn't found in the header, try to infer it from nearby/parent elements
+                                    if not academic_year:
+                                        try:
+                                            yr_re = re.compile(r'(\d{4})\s*[-–]\s*(\d{4})')
+                                            # Search closest ancestors first (accordion headers often live there)
+                                            parent = card
+                                            for _ in range(6):
+                                                if not parent:
+                                                    break
+                                                parent = parent.parent
+                                                if not parent or not hasattr(parent, 'get_text'):
+                                                    continue
+                                                parent_text = parent.get_text(' ', strip=True)
+                                                m = yr_re.search(parent_text or '')
+                                                if m:
+                                                    academic_year = f"{m.group(1)}-{m.group(2)}"
+                                                    break
+                                        except Exception:
+                                            pass
+                                    
+                                    # Extract semester name (handle common English/Arabic/Kurdish variants)
+                                    ht_lower = header_text.lower()
+
+                                    # English seasons
+                                    if 'fall' in ht_lower:
+                                        semester_name = "Fall Semester"
+                                    elif 'spring' in ht_lower:
+                                        semester_name = "Spring Semester"
+                                    elif 'summer' in ht_lower:
+                                        semester_name = "Summer Semester"
+
+                                    # Arabic seasons
+                                    elif 'خريف' in header_text or 'الخريف' in header_text:
+                                        semester_name = "Fall Semester"
+                                    elif 'ربيع' in header_text or 'الربيع' in header_text:
+                                        semester_name = "Spring Semester"
+                                    elif 'صيف' in header_text or 'الصيف' in header_text:
+                                        semester_name = "Summer Semester"
+
+                                    # Kurdish seasons (best-effort)
+                                    elif 'خەزان' in header_text:
+                                        semester_name = "Fall Semester"
+                                    elif 'بەهار' in header_text:
+                                        semester_name = "Spring Semester"
+                                    elif 'هاوین' in header_text:
+                                        semester_name = "Summer Semester"
+
+                                    # Generic semester numbering (do NOT translate to fall/spring unless explicitly stated)
+                                    elif re.search(r'\b(1st|first)\s+semester\b', ht_lower) or 'الفصل الأول' in header_text or 'الفصل الاول' in header_text or 'وەرزی یەکەم' in header_text:
+                                        semester_name = "First Semester"
+                                    elif re.search(r'\b(2nd|second)\s+semester\b', ht_lower) or 'الفصل الثاني' in header_text or 'الفصل الثانى' in header_text or 'وەرزی دووەم' in header_text:
+                                        semester_name = "Second Semester"
+                                    elif re.search(r'\bsemester\s*(1|one)\b', ht_lower):
+                                        semester_name = "First Semester"
+                                    elif re.search(r'\bsemester\s*(2|two)\b', ht_lower):
+                                        semester_name = "Second Semester"
+
+                                    # If semester still unknown, scan the whole card text (some headers are year-only: "Result of2024-2025")
+                                    if not semester_name:
+                                        try:
+                                            card_text = card.get_text(' ', strip=True)
+                                            card_lower = (card_text or '').lower()
+
+                                            # Only infer semester from body text when it is unambiguous.
+                                            # Some portal cards include BOTH fall and spring in the same card (year-only header).
+                                            # In that case, guessing would duplicate subjects across semesters.
+                                            detected = []
+
+                                            fall_hit = ('fall' in card_lower) or ('خريف' in card_text) or ('الخريف' in card_text) or ('خەزان' in card_text)
+                                            spring_hit = ('spring' in card_lower) or ('ربيع' in card_text) or ('الربيع' in card_text) or ('بەهار' in card_text)
+                                            summer_hit = ('summer' in card_lower) or ('صيف' in card_text) or ('الصيف' in card_text) or ('هاوین' in card_text)
+
+                                            first_hit = bool(re.search(r'\b(1st|first)\s+semester\b', card_lower)) or ('الفصل الأول' in card_text) or ('الفصل الاول' in card_text) or ('وەرزی یەکەم' in card_text)
+                                            second_hit = bool(re.search(r'\b(2nd|second)\s+semester\b', card_lower)) or ('الفصل الثاني' in card_text) or ('الفصل الثانى' in card_text) or ('وەرزی دووەم' in card_text)
+
+                                            if fall_hit:
+                                                detected.append('fall')
+                                            if spring_hit:
+                                                detected.append('spring')
+                                            if summer_hit:
+                                                detected.append('summer')
+                                            if first_hit:
+                                                detected.append('first')
+                                            if second_hit:
+                                                detected.append('second')
+
+                                            # If exactly one semester type is present, map it.
+                                            if len(detected) == 1:
+                                                one = detected[0]
+                                                if one == 'fall':
+                                                    semester_name = "Fall Semester"
+                                                elif one == 'spring':
+                                                    semester_name = "Spring Semester"
+                                                elif one == 'summer':
+                                                    semester_name = "Summer Semester"
+                                                elif one == 'first':
+                                                    semester_name = "First Semester"
+                                                elif one == 'second':
+                                                    semester_name = "Second Semester"
+                                        except Exception:
+                                            pass
+                                    
+                                # If semester name couldn't be parsed, do NOT fall back to year-only labels.
+                                # We prefer skipping/marking unknown rather than mis-grouping.
+                                if not semester_name:
+                                    semester_name = "Unknown Semester"
+
+                                logger.info(f"Detected: {academic_year} - {semester_name}")
+                                
+                                # Extract table data
+                                table = card.find('table')
+                                if not table:
+                                    logger.warning(f"No table found in card with header: {header_text}")
+                                    continue
+
+                                import re
+
+                                _grade_tokens = [
+                                    # English
+                                    'accept', 'excellent', 'verygood', 'very good', 'good', 'medium', 'weak',
+                                    'pass', 'fail', 'pending', 'not marked', 'not marked yet',
+                                    # Arabic / Kurdish common labels
+                                    'ناجح', 'راسب', 'مقبول', 'جيد', 'جيد جدا', 'ممتاز', 'قيد الانتظار', 'غير مصحح'
+                                ]
+                                _grade_re = re.compile(r'(' + '|'.join(re.escape(t) for t in _grade_tokens) + r')', re.IGNORECASE)
+
+                                def _extract_grade_token(text: str) -> str:
+                                    m = _grade_re.search((text or '').strip())
+                                    return m.group(1).strip() if m else ''
+
+                                def _extract_last_number(text: str) -> str:
+                                    nums = re.findall(r'\d+(?:\.\d+)?', (text or '').strip())
+                                    return nums[-1] if nums else ''
+
+                                def _parse_portal_summary_cell(cell) -> tuple[str, str]:
+                                    """Return (total_grade_number, status_label) from the nested summary tables."""
+                                    if cell is None:
+                                        return ('', '')
+
+                                    # The portal renders a mini-table like:
+                                    # headers: Continuous Exam | Total
+                                    # row:     31.5           | VeryGood
+                                    nested_tables = cell.find_all('table')
+                                    for nt in nested_tables:
+                                        # Read all rows and look for a grade token in any cell.
+                                        for tr in nt.find_all('tr'):
+                                            tds = tr.find_all(['td', 'th'])
+                                            if len(tds) < 2:
+                                                continue
+                                            texts = [td.get_text(' ', strip=True) for td in tds]
+                                            joined = ' '.join(texts)
+                                            grade = _extract_grade_token(joined)
+                                            if not grade:
+                                                continue
+                                            # Prefer a number from the same row
+                                            num = ''
+                                            for tx in texts:
+                                                num = _extract_last_number(tx)
+                                                if num:
+                                                    break
+                                            return (num, grade)
+
+                                    # Fallback: scan the whole cell text
+                                    cell_text = cell.get_text(' ', strip=True)
+                                    return (_extract_last_number(cell_text), _extract_grade_token(cell_text))
+
+                                def _is_non_subject_title(title: str) -> bool:
+                                    t = (title or '').strip().lower()
+                                    if not t:
+                                        return True
+                                    # Obvious non-subject/assessment lines
+                                    bad_tokens = [
+                                        'total', 'sum', 'subtotal', 'overall', 'result',
+                                        'quiz', 'mid term', 'midterm', 'activity', 'assignment', 'report',
+                                        'presentation', 'seminar', 'practical', 'lab', 'project',
+                                        'hw', 'homework', 'home work',
+                                        'exam', 'normal exam'
+                                    ]
+                                    if any(tok in t for tok in bad_tokens):
+                                        return True
+                                    if any(tok in t for tok in ['المجموع', 'مجموع', 'الكلي', 'كۆی', 'کۆی گشتی', 'جمع']):
+                                        return True
+                                    # If the title itself is only a grade token
+                                    if _grade_re.fullmatch((title or '').strip()):
+                                        return True
+                                    return False
+
+                                # ===== Preferred parsing path (matches the portal UI) =====
+                                # Table columns often are: Title | Credit | Continuous Exams Summary (nested mini-table)
+                                # We will parse each <tr> structurally to avoid confusing credit/rowspan.
+                                # Try to detect the Title column from the table header (some portals include a Code column first).
+                                title_col_idx = None
+                                try:
+                                    header_tr = None
+                                    thead = table.find('thead')
+                                    if thead:
+                                        header_tr = thead.find('tr')
+                                    if not header_tr:
+                                        # Fallback: first row containing <th>
+                                        for _tr in table.find_all('tr'):
+                                            if _tr.find('th'):
+                                                header_tr = _tr
+                                                break
+                                    if header_tr:
+                                        header_cells = header_tr.find_all(['th', 'td'])
+                                        header_texts = [c.get_text(' ', strip=True).lower() for c in header_cells]
+                                        for i, ht in enumerate(header_texts):
+                                            if any(tok in ht for tok in ['title', 'course title', 'subject', 'المادة', 'المقرر', 'ناونیشان', 'ناوی']):
+                                                title_col_idx = i
+                                                break
+                                except Exception:
+                                    title_col_idx = None
+
+                                body_rows = []
+                                tbody = table.find('tbody')
+                                if tbody:
+                                    body_rows = tbody.find_all('tr', recursive=False) or tbody.find_all('tr')
+                                else:
+                                    # fallback: all trs excluding header
+                                    body_rows = table.find_all('tr')
+                                    if body_rows and body_rows[0].find('th'):
+                                        body_rows = body_rows[1:]
+
+                                parsed_any_structured = False
+                                for tr in body_rows:
+                                    tds = tr.find_all('td', recursive=False) or tr.find_all('td')
+                                    if not tds:
+                                        continue
+
+                                    # Title column (header-driven when possible; otherwise heuristics)
+                                    subject_title = ''
+                                    if title_col_idx is not None and 0 <= title_col_idx < len(tds):
+                                        subject_title = tds[title_col_idx].get_text(' ', strip=True)
+                                    else:
+                                        # Heuristic: choose the first cell that contains letters (not pure numeric code)
+                                        cell_texts = [td.get_text(' ', strip=True) for td in tds]
+                                        for tx in cell_texts:
+                                            if tx and any(ch.isalpha() for ch in tx):
+                                                subject_title = tx
+                                                break
+                                        if not subject_title and cell_texts:
+                                            subject_title = cell_texts[0]
+
+                                    subject_title = (subject_title or '').strip()
+                                    # If the "title" is actually a code like 0108/5105, try another cell
+                                    if re.fullmatch(r'\d{3,}', subject_title):
+                                        for td in tds:
+                                            tx = td.get_text(' ', strip=True).strip()
+                                            if tx and any(ch.isalpha() for ch in tx):
+                                                subject_title = tx
+                                                break
+
+                                    # Still numeric? skip (not a subject name row)
+                                    if re.fullmatch(r'\d{3,}', subject_title or ''):
+                                        continue
+
+                                    if _is_non_subject_title(subject_title):
+                                        continue
+
+                                    # Summary cell is usually the last column
+                                    summary_cell = tds[-1]
+                                    total_num, grade_label = _parse_portal_summary_cell(summary_cell)
+                                    if not grade_label:
+                                        # If it doesn't carry a final label, don't show it.
+                                        continue
+
+                                    # If numeric total is missing, keep '-' (portal sometimes shows only label)
+                                    if not total_num:
+                                        total_num = '-'
+
+                                    results.append({
+                                        'AcademicYear': academic_year,
+                                        'SemesterName': semester_name,
+                                        'SemesterLabel': semester_label,
+                                        'SubjectName': subject_title,
+                                        'ContinuousSummary': total_num,
+                                        'Title': subject_title,
+                                        'TotalGrade': total_num,
+                                        'Status': grade_label,
+                                        'StudentId': student_id,
+                                    })
+                                    # De-duplicate within same year+semester for identical titles (avoid duplicates)
+                                    try:
+                                        t_norm = (subject_title or '').strip().lower()
+                                        if t_norm and 'retake' not in t_norm and 'اعادة' not in t_norm and 'إعادة' not in t_norm:
+                                            k = (academic_year or '', semester_name or '', t_norm)
+                                            new_row = results[-1]
+                                            existing = best_by_key.get(k)
+                                            if existing is None:
+                                                best_by_key[k] = new_row
+                                            else:
+                                                # Prefer rows with numeric TotalGrade and non-empty Status
+                                                def _score(row):
+                                                    tg = str(row.get('TotalGrade', '')).strip()
+                                                    st = str(row.get('Status', '')).strip()
+                                                    has_num = 1 if re.fullmatch(r'\d+(?:\.\d+)?', tg) else 0
+                                                    has_status = 1 if st and st != '-' else 0
+                                                    return (has_num, has_status, float(tg) if has_num else -1.0)
+                                                if _score(new_row) > _score(existing):
+                                                    best_by_key[k] = new_row
+                                    except Exception:
+                                        pass
+                                    parsed_any_structured = True
+
+                                # If we successfully parsed the table in structured mode, do not fall back to heuristics.
+                                if parsed_any_structured:
+                                    continue
+
+                                def _cell_value(cell) -> str:
+                                    """Best-effort text extraction for cells that may be icon-only."""
+                                    if cell is None:
+                                        return ''
+                                    text = cell.get_text(' ', strip=True)
+                                    if text:
+                                        return text
+                                    for attr in ('title', 'aria-label', 'data-original-title', 'data-title'):
+                                        v = cell.get(attr)
+                                        if v and str(v).strip():
+                                            return str(v).strip()
+                                    inner_with_title = cell.find(attrs={'title': True})
+                                    if inner_with_title:
+                                        v = inner_with_title.get('title')
+                                        if v and str(v).strip():
+                                            return str(v).strip()
+                                    return ''
+
+                                def _safe_int(value, default=1):
+                                    try:
+                                        return int(str(value))
+                                    except Exception:
+                                        return default
+
+                                def _expand_rows_with_spans(trs):
+                                    """Expand a list of <tr> into a grid of strings, honoring rowspan/colspan."""
+                                    grid = []
+                                    spans = {}  # col_index -> [remaining_rows, text]
+
+                                    for tr in trs:
+                                        row = []
+                                        col = 0
+
+                                        def _fill_spans_until_free():
+                                            nonlocal col
+                                            while col in spans:
+                                                remaining, val = spans[col]
+                                                row.append(val)
+                                                remaining -= 1
+                                                if remaining <= 0:
+                                                    del spans[col]
+                                                else:
+                                                    spans[col] = [remaining, val]
+                                                col += 1
+
+                                        _fill_spans_until_free()
+
+                                        cells = tr.find_all(['td', 'th'], recursive=False)
+                                        if not cells:
+                                            cells = tr.find_all(['td', 'th'])
+
+                                        for cell in cells:
+                                            _fill_spans_until_free()
+                                            text = _cell_value(cell)
+                                            rowspan = _safe_int(cell.get('rowspan'), 1)
+                                            colspan = _safe_int(cell.get('colspan'), 1)
+
+                                            for _ in range(max(1, colspan)):
+                                                row.append(text)
+                                                if rowspan and rowspan > 1:
+                                                    spans[col] = [rowspan - 1, text]
+                                                col += 1
+
+                                        # Fill trailing spans that appear after the last explicit cell
+                                        _fill_spans_until_free()
+                                        if any((c or '').strip() for c in row):
+                                            grid.append(row)
+
+                                    return grid
+
+                                # Determine column indices based on header labels (college system table)
+                                header_row = None
+                                thead = table.find('thead')
+                                if thead:
+                                    header_row = thead.find('tr')
+                                if not header_row:
+                                    # Fallback: first row that contains <th>
+                                    for tr in table.find_all('tr'):
+                                        if tr.find('th'):
+                                            header_row = tr
+                                            break
+
+                                headers = []
+                                if header_row:
+                                    headers = [th.get_text(' ', strip=True) for th in header_row.find_all(['th', 'td'])]
+
+                                # Log header labels (shape inspection) without logging student data rows
+                                if headers:
+                                    logger.info("Official results table headers: %s", headers)
+
+                                def _norm_header(text: str) -> str:
+                                    import re
+                                    return re.sub(r'\s+', ' ', (text or '').strip().lower())
+
+                                idx_subject = None
+                                idx_grade = None
+                                idx_cont_summary = None
+                                idx_total = None
+                                idx_status = None
+
+                                # Build an index map using common English/Arabic/Kurdish tokens
+                                for i, h in enumerate(headers):
+                                    hn = _norm_header(h)
+                                    # Subject name / course title
+                                    if idx_subject is None and any(tok in hn for tok in ['course title', 'course', 'subject', 'title', 'ناونیشان', 'ناوی', 'المادة', 'المقرر']):
+                                        idx_subject = i
+
+                                    # Grade / evaluation label (often contains Accept/Excellent/Medium)
+                                    if idx_grade is None and any(tok in hn for tok in ['grade', 'evaluation', 'result', 'التقدير', 'الدرجة', 'درجة', 'پۆل', 'پلە', 'نمرە']):
+                                        idx_grade = i
+
+                                    # Continuous Exams Summary (prefer explicit continuous/summary labels)
+                                    if idx_cont_summary is None and any(tok in hn for tok in ['continuous exam', 'continuous exams', 'continuous exam', 'continuous', 'continous', 'summary', 'continuous exams summary', 'تقييم مستمر', 'الامتحانات المستمرة', 'خولاو', 'چالاکی']):
+                                        idx_cont_summary = i
+
+                                    # If no explicit continuous summary exists, allow points/score as a fallback (NOT total label)
+                                    if idx_cont_summary is None and any(tok in hn for tok in ['points', 'point', 'score', 'النقاط']):
+                                        idx_cont_summary = i
+
+                                    # Final numeric total (do NOT confuse with Status)
+                                    if idx_total is None and any(tok in hn for tok in ['total', 'overall', 'المجموع', 'المجموع الكلي', 'المجموع الكلي', 'الكلي', 'كۆی', 'کۆی گشتی', 'جمع']):
+                                        idx_total = i
+
+                                    # Status / state label
+                                    if idx_status is None and any(tok in hn for tok in ['status', 'state', 'الحالة', 'حالة', 'بار', 'دۆخ']):
+                                        idx_status = i
+
+                                # Identify data rows and expand rowspan/colspan to prevent column shifts
+                                all_trs = table.find_all('tr')
+                                data_trs = []
+                                if header_row and header_row in all_trs:
+                                    header_index = all_trs.index(header_row)
+                                    data_trs = all_trs[header_index + 1:]
+                                else:
+                                    data_trs = all_trs
+                                    if data_trs and data_trs[0].find('th'):
+                                        data_trs = data_trs[1:]
+
+                                grid = _expand_rows_with_spans(data_trs)
+
+                                def _get_cell(row, idx):
+                                    if idx is None:
+                                        return ''
+                                    if idx < 0:
+                                        return ''
+                                    return row[idx] if idx < len(row) else ''
+
+                                # If headers are missing, infer common column layout from data width
+                                if not headers and grid:
+                                    width = max(len(r) for r in grid)
+                                    # Common layouts:
+                                    # 4 cols: COURSE | GRADE | TOTAL | STATUS
+                                    # 5 cols: NO | COURSE | GRADE | TOTAL | STATUS
+                                    if width == 4:
+                                        idx_subject, idx_grade, idx_total, idx_status = 0, 1, 2, 3
+                                        idx_cont_summary = idx_cont_summary if idx_cont_summary is not None else 2
+                                    elif width >= 5:
+                                        idx_subject, idx_grade, idx_total, idx_status = 1, 2, 3, 4
+                                        idx_cont_summary = idx_cont_summary if idx_cont_summary is not None else 3
+                                    else:
+                                        idx_subject = 0
+                                        idx_total = max(0, width - 1)
+                                        idx_cont_summary = idx_cont_summary if idx_cont_summary is not None else idx_total
+                                        idx_status = idx_status if idx_status is not None else max(0, width - 1)
+
+                                # If some indices weren't detected, assume the standard order
+                                # Standard order commonly seen: NO | COURSE TITLE | GRADE | POINTS | STATUS
+                                if idx_subject is None and headers and len(headers) >= 2:
+                                    idx_subject = 1
+                                if idx_grade is None and headers and len(headers) >= 3:
+                                    idx_grade = 2
+                                if idx_total is None and headers and len(headers) >= 4:
+                                    idx_total = 3
+                                if idx_status is None and headers and len(headers) >= 5:
+                                    idx_status = 4
+                                if idx_cont_summary is None:
+                                    idx_cont_summary = idx_total
+
+                                # Heuristic guard: subject column should not be mostly numeric
+                                if grid and idx_subject is not None:
+                                    import re
+                                    sample = grid[: min(12, len(grid))]
+                                    subj_values = [(_get_cell(r, idx_subject) or '').strip() for r in sample]
+                                    numeric_like = sum(1 for v in subj_values if re.fullmatch(r'\d+(?:\.\d+)?', v or ''))
+                                    if numeric_like >= max(2, len(subj_values) // 2):
+                                        best_idx = idx_subject
+                                        best_score = -10**9
+                                        max_cols = max(len(r) for r in sample)
+                                        for ci in range(max_cols):
+                                            vals = [(_get_cell(r, ci) or '').strip() for r in sample]
+                                            alpha = sum(1 for v in vals if any(ch.isalpha() for ch in v))
+                                            num = sum(1 for v in vals if re.fullmatch(r'\d+(?:\.\d+)?', v or ''))
+                                            score = alpha - (2 * num)
+                                            if score > best_score:
+                                                best_score = score
+                                                best_idx = ci
+                                        idx_subject = best_idx
+
+                                logger.info(f"Found {len(grid)} result rows in semester: {header_text}")
+
+                                for row in grid:
+                                    subject_name = (_get_cell(row, idx_subject) or '').strip()
+                                    cont_summary = (_get_cell(row, idx_cont_summary) or '').strip()
+                                    total_text = (_get_cell(row, idx_total) or '').strip()
+                                    status_text = (_get_cell(row, idx_status) or '').strip()
+                                    grade_text = (_get_cell(row, idx_grade) or '').strip()
+
+                                    # Skip empty rows
+                                    if not subject_name or subject_name == '-':
+                                        continue
+                                    # Subject should not be pure numeric; if it is, skip (rowspan expansion should prevent this)
+                                    if re.fullmatch(r'\d+(?:\.\d+)?', subject_name):
+                                        continue
+
+                                    def _last_number(text: str) -> str:
+                                        nums = re.findall(r'\d+(?:\.\d+)?', (text or '').strip())
+                                        return nums[-1] if nums else ''
+
+                                    # Prefer the explicit Total column (if present), otherwise fall back to continuous/points
+                                    total_clean = _last_number(total_text)
+                                    cont_summary_clean = _last_number(cont_summary)
+
+                                    if not total_clean:
+                                        total_clean = cont_summary_clean
+
+                                    if not total_clean:
+                                        total_clean = "-"
+
+                                    # If we still don't have a plausible numeric total, try to infer from the row
+                                    if total_clean in ["-", "0"]:
+                                        all_nums = []
+                                        for cell_text in row:
+                                            for n in re.findall(r'\d+(?:\.\d+)?', (cell_text or '')):
+                                                try:
+                                                    all_nums.append(float(n))
+                                                except Exception:
+                                                    pass
+                                        # Avoid credits like 5/6; continuous exam scores tend to be >= 10
+                                        candidates = [n for n in all_nums if n >= 10]
+                                        if candidates:
+                                            total_clean = str(candidates[-1]).rstrip('0').rstrip('.')
+                                        else:
+                                            total_clean = "-"
+
+                                    # Status: prefer explicit Status column; if empty, fall back to non-numeric Grade labels
+                                    status_clean = (status_text or '').strip()
+                                    # Guard: status should not be numeric (numeric values belong to total/summary columns)
+                                    if status_clean and re.fullmatch(r'\d+(?:\.\d+)?', status_clean):
+                                        status_clean = ''
+                                    if not status_clean:
+                                        # Many portal tables put Accept/Excellent/Medium/etc under Grade
+                                        if grade_text and not re.fullmatch(r'\d+(?:\.\d+)?', grade_text):
+                                            status_clean = grade_text.strip()
+
+                                    # If still empty, scan other cells for grade-like tokens (handles nested "Continuous Exam / Total" blocks)
+                                    if not status_clean:
+                                        for cell_text in reversed(row):
+                                            ct = (cell_text or '').strip()
+                                            if not ct:
+                                                continue
+                                            m = _grade_re.search(ct)
+                                            if m:
+                                                # Always use the matched grade token; do not include surrounding text.
+                                                status_clean = m.group(1)
+                                                break
+
+                                    # No guessing: only show portal-provided labels; if missing, show '-'
+                                    if not status_clean:
+                                        status_clean = "-"
+
+                                    # === FILTER: keep ONLY final subject rows (drop quiz/midterm/summary lines) ===
+                                    subj_lower = subject_name.strip().lower()
+                                    status_lower = status_clean.strip().lower()
+
+                                    def _contains_any(text: str, tokens) -> bool:
+                                        t = (text or '').lower()
+                                        return any(tok in t for tok in tokens)
+
+                                    # Drop obvious non-subject summary lines
+                                    if subj_lower in {'total', 'sum', 'subtotal', 'overall', 'result'}:
+                                        continue
+                                    if _contains_any(subj_lower, ['total', 'subtotal', 'overall', 'sum', 'result', 'المجموع', 'مجموع', 'الكلي', 'كۆی', 'کۆی گشتی', 'جمع']):
+                                        continue
+
+                                    # Drop rows where the "subject" itself is just a grade label (e.g., 'Medium')
+                                    if _grade_re.fullmatch(subject_name.strip()):
+                                        continue
+
+                                    # Drop assessment-detail rows (quiz/midterm/etc.) unless they truly carry final labels
+                                    assessment_like = any(tok in subj_lower for tok in [
+                                        'quiz', 'mid term', 'midterm', 'activity', 'act.', 'ass.', 'assignment',
+                                        'report', 'seminar', 'practical', 'presentation', 'final',
+                                        'hw', 'homework', 'home work', 'project', 'lab'
+                                    ])
+
+                                    # A final subject row should have a final-status-like label OR be explicitly pending/not marked.
+                                    status_looks_final = bool(_grade_re.search(status_clean))
+                                    if status_clean == '-':
+                                        status_looks_final = False
+
+                                    # If it's assessment-like and does not look like a final status row, drop it
+                                    if assessment_like and not status_looks_final:
+                                        continue
+
+                                    # If it does not look like a final status row AND also has no usable total, drop it
+                                    if not status_looks_final and total_clean in ['-', '0', '0.0']:
+                                        continue
+
+                                    # If the "status" text itself looks like an assessment label (HW 2, Quiz, etc.), drop it
+                                    if _contains_any(status_lower, ['hw', 'homework', 'quiz', 'mid term', 'midterm', 'assignment', 'report', 'presentation', 'project', 'lab']):
+                                        continue
+
+                                    results.append({
+                                        'AcademicYear': academic_year,
+                                        'SemesterName': semester_name,
+                                        'SemesterLabel': semester_label,
+                                        # Back-compat keys (used by existing frontend fallbacks)
+                                        'SubjectName': subject_name,
+                                        'ContinuousSummary': total_clean,
+                                        # Explicit simplified keys for final table mapping
+                                        'Title': subject_name,
+                                        'TotalGrade': total_clean,
+                                        'Status': status_clean,
+                                        'StudentId': student_id,
+                                    })
+                                    # De-duplicate within same year+semester for identical titles (avoid duplicates)
+                                    try:
+                                        t_norm = (subject_name or '').strip().lower()
+                                        if t_norm and 'retake' not in t_norm and 'اعادة' not in t_norm and 'إعادة' not in t_norm:
+                                            k = (academic_year or '', semester_name or '', t_norm)
+                                            new_row = results[-1]
+                                            existing = best_by_key.get(k)
+                                            if existing is None:
+                                                best_by_key[k] = new_row
+                                            else:
+                                                def _score(row):
+                                                    tg = str(row.get('TotalGrade', '')).strip()
+                                                    st = str(row.get('Status', '')).strip()
+                                                    has_num = 1 if re.fullmatch(r'\d+(?:\.\d+)?', tg) else 0
+                                                    has_status = 1 if st and st != '-' else 0
+                                                    return (has_num, has_status, float(tg) if has_num else -1.0)
+                                                if _score(new_row) > _score(existing):
+                                                    best_by_key[k] = new_row
+                                    except Exception:
+                                        pass
+                            except Exception as row_error:
+                                logger.error(f"Error parsing result card: {row_error}")
+                                continue
+                        
+                        # Finalize: keep only the best row per (year, semester, title) and drop ambiguous semester rows
+                        final_results = []
+                        try:
+                            import re
+                            for row in results:
+                                year = str(row.get('AcademicYear', '') or '').strip()
+                                sem = str(row.get('SemesterName', '') or '').strip()
+                                title = str(row.get('Title') or row.get('SubjectName') or '').strip()
+                                t_norm = title.lower()
+                                is_retake = ('retake' in t_norm) or ('اعادة' in t_norm) or ('إعادة' in t_norm)
+
+                                # Only keep rows that can be placed in a real semester
+                                if not year:
+                                    continue
+                                if not sem or sem == 'Unknown Semester':
+                                    continue
+
+                                if is_retake:
+                                    final_results.append(row)
+                                    continue
+
+                                k = (year, sem, t_norm)
+                                if best_by_key.get(k) is row:
+                                    final_results.append(row)
+                        except Exception:
+                            final_results = results
+
+                        results = final_results
+
+                        logger.info(f"✓ Successfully parsed {len(results)} official results for student {student_id}")
+                        
+                        return {
+                            'success': True,
+                            'results': results,
+                            'total_count': len(results)
+                        }
+                    
+                    # Try JSON if not HTML
+                    data = response.json()
+                    logger.info(f"Parsed JSON structure - Type: {type(data)}, Keys: {data.keys() if isinstance(data, dict) else 'N/A'}")
+                    
+                    # Handle different API response structures
+                    results = []
+                    if isinstance(data, list):
+                        results = data
+                    elif isinstance(data, dict):
+                        for key in ['data', 'Data', 'results', 'Results', 'items', 'Items', 'list', 'List']:
+                            if key in data:
+                                results = data[key]
+                                break
+                        if not results and data:
+                            results = [data]
+                    
+                    if not isinstance(results, list):
+                        results = [results] if results else []
+                    
+                    logger.info(f"✓ Successfully fetched {len(results)} official results for student {student_id}")
+                    
+                    return {
+                        'success': True,
+                        'results': results,
+                        'total_count': len(results)
+                    }
+                    
+                except ValueError as e:
+                    logger.error(f"Response parsing failed: {str(e)}")
+                    logger.error(f"Response content: {response.text[:500]}")
+                    return {
+                        'success': False,
+                        'error': 'Unable to parse server response. Please try again.',
+                        'results': []
+                    }
+                    
+            except requests.Timeout:
+                return {
+                    'success': False,
+                    'error': 'Request timeout. Please try again.',
+                    'results': []
+                }
+            except requests.RequestException as e:
+                logger.error(f"Request error fetching official results: {str(e)}")
+                return {
+                    'success': False,
+                    'error': f'Network error: {str(e)}',
+                    'results': []
+                }
+            except Exception as e:
+                logger.exception(f"Unexpected error fetching official results: {str(e)}")
+                return {
+                    'success': False,
+                    'error': f'Error: {str(e)}',
+                    'results': []
+                }
+        
+        # Fetch results in thread to avoid blocking
+        result = await asyncio.to_thread(fetch_official_results)
+        
+        if result['success']:
+            return JSONResponse({
+                "success": True,
+                "results": result['results'],
+                "total_count": result.get('total_count', 0)
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "error": result.get('error', 'Failed to fetch official results'),
+                "results": []
+            }, status_code=401 if 'expired' in result.get('error', '').lower() or 'unauthorized' in result.get('error', '').lower() else 500)
+    
+    except Exception as exc:
+        logger.exception("Error fetching official results data: %s", str(exc))
+        return JSONResponse({
+            "success": False,
+            "error": f"Server error: {str(exc)}",
+            "results": []
+        }, status_code=500)
+
+
 # ============================================
 # ADMIN SOC (Security Operations Center)
 # ============================================
 
+SECRET_ADMIN_KEY = os.getenv("ADMIN_KEY", "change-this-secret-key")
+
 @app.get("/admin-portal")
 async def admin_portal(admin_key: str = None) -> HTMLResponse:
+    # TODO: Implement admin portal
+    return HTMLResponse("<h1>Admin Portal</h1>")
     """
     Hidden Admin Dashboard for security monitoring and IP management
     Protected by SECRET_ADMIN_KEY
@@ -1478,7 +2546,7 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
     <body oncontextmenu="return false;">
         <!-- Splash Screen -->
         <div id="splash-screen">
-            <img src="/static/icons/icon-192.png" alt="SwiftSync" class="splash-logo">
+            <img src="/static/icons/icon-192x192.png?v={logo_version}" alt="SwiftSync" class="splash-logo">
             <div class="splash-text">SwiftSync</div>
             <div class="splash-subtitle">by SSCreative</div>
         </div>
@@ -1512,7 +2580,7 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                 // Prompt for admin key (never hardcode it!)
                 const adminKey = prompt('Enter admin key:');
                 if (!adminKey) {{
-                    alert('❌ Admin key required');
+                    alert('Admin key required');
                     return;
                 }}
                 
@@ -1523,13 +2591,13 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                     const data = await response.json();
                     
                     if (data.success) {{
-                        alert('✅ ' + data.message);
+                        alert(data.message);
                         location.reload();
                     }} else {{
-                        alert('❌ Error: ' + data.error);
+                        alert('Error: ' + data.error);
                     }}
                 }} catch (error) {{
-                    alert('❌ Failed to clear activity: ' + error.message);
+                    alert('Failed to clear activity: ' + error.message);
                 }}
             }}
         </script>
@@ -1702,10 +2770,10 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                     <button class="btn threat-btn" onclick="location.reload()">
                         <i class="fas fa-sync"></i> Refresh Rules
                     </button>
-                    <button class="btn threat-btn" onclick="showNotification('📊 Threat analytics feature coming soon')">
+                    <button class="btn threat-btn" onclick="showNotification('Threat analytics feature coming soon')">
                         <i class="fas fa-chart-bar"></i> View Analytics
                     </button>
-                    <button class="btn threat-btn" onclick="showNotification('⚙️ Advanced rule configuration available in settings')">
+                    <button class="btn threat-btn" onclick="showNotification('Advanced rule configuration available in settings')">
                         <i class="fas fa-cog"></i> Configure Rules
                     </button>
                 </div>
@@ -1730,7 +2798,7 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                         backdrop-filter: blur(10px);
                         max-width: 350px;
                     `;
-                    notification.textContent = message;
+                    notification.innerHTML = '<i class="fas fa-info-circle" style="margin-right: 0.5rem;"></i>' + message;
                     document.body.appendChild(notification);
                     
                     setTimeout(() => {{
@@ -2106,6 +3174,7 @@ async def attendance_logout(request: Request, session_token: str = None) -> JSON
 
 @app.get("/")
 async def dashboard() -> HTMLResponse:
+    logo_version = "2026-03-18"
     html = f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -2122,7 +3191,7 @@ async def dashboard() -> HTMLResponse:
         <meta name="apple-mobile-web-app-title" content="SwiftSync">
         <meta name="mobile-web-app-capable" content="yes">
         <link rel="manifest" href="/manifest.json">
-        <link rel="apple-touch-icon" href="/static/icons/icon-192x192.png">
+        <link rel="apple-touch-icon" href="/static/icons/icon-192x192.png?v={logo_version}">
         
         <!-- PERFORMANCE: Preconnect to external resources for faster loading -->
         <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
@@ -2136,7 +3205,7 @@ async def dashboard() -> HTMLResponse:
         <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" as="style">
         
         <!-- Preload critical resources for instant display -->
-        <link rel="preload" href="/static/icons/icon-192.png" as="image">
+        <link rel="preload" href="/static/icons/icon-192x192.png?v={logo_version}" as="image">
         
         <!-- Load CSS -->
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -2312,6 +3381,16 @@ async def dashboard() -> HTMLResponse:
                 caret-color: transparent;
             }}
             
+            /* Smooth scrolling globally */
+            html {{
+                scroll-behavior: smooth;
+            }}
+            
+            body {{
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }}
+            
             /* Allow text selection for copying */
             ::selection {{
                 background: var(--accent);
@@ -2363,7 +3442,7 @@ async def dashboard() -> HTMLResponse:
                 backdrop-filter: blur(5px);
                 border-radius: 15px;
                 padding: 1.5rem 2rem;
-                border: 1px solid rgba(255, 215, 0, 0.15);
+                border: 1px solid rgba(34, 211, 238, 0.35);
             }}
             
             .logo {{
@@ -2376,196 +3455,43 @@ async def dashboard() -> HTMLResponse:
                 width: 60px;
                 height: 60px;
                 border-radius: 18px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                box-shadow: 0 8px 32px rgba(220, 20, 60, 0.4), 0 0 40px rgba(255, 215, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.3);
-                animation: flagGlow 4s ease-in-out infinite;
                 overflow: hidden;
                 position: relative;
-                background: linear-gradient(135deg, rgba(10, 10, 10, 0.8), rgba(20, 20, 20, 0.9));
-            }}
-            
-            @keyframes flagGlow {{
-                0%, 100% {{ 
-                    box-shadow: 0 8px 32px rgba(220, 20, 60, 0.4), 0 0 40px rgba(255, 215, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.3);
-                    transform: translateY(0);
-                }}
-                50% {{ 
-                    box-shadow: 0 12px 48px rgba(220, 20, 60, 0.6), 0 0 60px rgba(255, 215, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.4);
-                    transform: translateY(-2px);
-                }}
-            }}
-            
-            .logo-icon::before {{
-                content: '';
-                position: absolute;
-                top: 0;
-                left: -10%;
-                width: 120%;
-                height: 33%;
-                background: linear-gradient(180deg, 
-                    #E63946 0%, 
-                    #DC143C 20%, 
-                    #C41230 60%, 
-                    #B71C1C 100%);
-                box-shadow: inset 0 -3px 10px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(220, 20, 60, 0.4);
-                animation: waveTop 3s ease-in-out infinite;
-                transform-origin: center;
-            }}
-            
-            @keyframes waveTop {{
-                0%, 100% {{ 
-                    transform: skewY(0deg) translateX(0);
-                    border-radius: 0 0 50% 50% / 0 0 20% 20%;
-                }}
-                50% {{ 
-                    transform: skewY(-1deg) translateX(2px);
-                    border-radius: 0 0 45% 55% / 0 0 18% 22%;
-                }}
-            }}
-            
-            .logo-icon::after {{
-                content: '';
-                position: absolute;
-                bottom: 0;
-                left: -10%;
-                width: 120%;
-                height: 33%;
-                background: linear-gradient(180deg, 
-                    #1B7A1B 0%, 
-                    #2E7D32 30%, 
-                    #228B22 70%, 
-                    #0F5F0F 100%);
-                box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.3), 0 -2px 8px rgba(34, 139, 34, 0.4);
-                animation: waveBottom 3s ease-in-out infinite;
-                animation-delay: 0.2s;
-                transform-origin: center;
-            }}
-            
-            @keyframes waveBottom {{
-                0%, 100% {{ 
-                    transform: skewY(0deg) translateX(0);
-                    border-radius: 50% 50% 0 0 / 20% 20% 0 0;
-                }}
-                50% {{ 
-                    transform: skewY(1deg) translateX(-2px);
-                    border-radius: 55% 45% 0 0 / 22% 18% 0 0;
-                }}
-            }}
-            
-            .logo-icon .flag-center {{
-                position: absolute;
-                top: 33%;
-                left: -5%;
-                width: 110%;
-                height: 34%;
-                background: linear-gradient(135deg, 
-                    #FFFFFF 0%, 
-                    #FAFAFA 30%, 
-                    #F8F8F8 60%, 
-                    #F0F0F0 100%);
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.1), inset 0 -2px 8px rgba(0, 0, 0, 0.1);
-                animation: waveMid 2.5s ease-in-out infinite;
-                z-index: 2;
+                background: radial-gradient(circle at 30% 20%, #22d3ee 0%, #14b8a6 35%, #020617 100%);
+                box-shadow: 0 0 22px rgba(34, 211, 238, 0.7);
+                animation: logoPulse 4s ease-in-out infinite;
             }}
-            
-            @keyframes waveMid {{
-                0%, 100% {{ transform: scaleY(1) translateY(0); }}
-                50% {{ transform: scaleY(1.05) translateY(-0.5px); }}
+            .logo-icon::before,
+            .logo-icon::after {{
+                content: none;
             }}
-            
-            .logo-icon .sun {{
-                width: 14px;
-                height: 14px;
-                background: radial-gradient(circle at 30% 30%, 
-                    #FFFACD 0%, 
-                    #FFD700 30%, 
-                    #FFA500 60%, 
-                    #FF8C00 100%);
-                border-radius: 50%;
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                animation: sunPulse 3s ease-in-out infinite;
-                box-shadow: 
-                    0 0 8px rgba(255, 215, 0, 1),
-                    0 0 16px rgba(255, 165, 0, 0.8),
-                    0 0 24px rgba(255, 140, 0, 0.6),
-                    inset -3px -3px 6px rgba(255, 140, 0, 0.4),
-                    inset 2px 2px 4px rgba(255, 250, 205, 0.6);
-                z-index: 10;
+
+            .logo-icon img {{
+                width: 120%;
+                height: 120%;
+                object-fit: cover;
+                border-radius: inherit;
+                display: block;
             }}
-            
-            @keyframes sunPulse {{
-                0%, 100% {{ 
-                    transform: translate(-50%, -50%) scale(1) rotate(0deg);
-                    box-shadow: 
-                        0 0 15px rgba(255, 215, 0, 1),
-                        0 0 30px rgba(255, 165, 0, 0.8),
-                        0 0 45px rgba(255, 140, 0, 0.6);
+
+            @keyframes logoPulse {{
+                0%, 100% {{
+                    transform: translateY(0) scale(1);
+                    box-shadow: 0 0 18px rgba(34, 211, 238, 0.6);
                 }}
-                50% {{ 
-                    transform: translate(-50%, -50%) scale(1.12) rotate(45deg);
-                    box-shadow: 
-                        0 0 20px rgba(255, 215, 0, 1),
-                        0 0 40px rgba(255, 165, 0, 1),
-                        0 0 60px rgba(255, 140, 0, 0.8),
-                        0 0 80px rgba(255, 140, 0, 0.4);
+                50% {{
+                    transform: translateY(-2px) scale(1.03);
+                    box-shadow: 0 0 30px rgba(56, 189, 248, 0.9);
                 }}
-            }}
-            
-            .logo-icon .sun::before {{
-                content: '';
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                width: 35px;
-                height: 35px;
-                transform: translate(-50%, -50%);
-                background: 
-                    repeating-conic-gradient(
-                        from 0deg,
-                        transparent 0deg 8deg,
-                        rgba(255, 215, 0, 0.35) 8deg 16deg
-                    );
-                border-radius: 50%;
-                animation: sunRays 8s linear infinite;
-                z-index: -1;
-            }}
-            
-            @keyframes sunRays {{
-                0% {{ transform: translate(-50%, -50%) rotate(0deg) scale(1); opacity: 0.5; }}
-                50% {{ transform: translate(-50%, -50%) rotate(180deg) scale(1.08); opacity: 0.8; }}
-                100% {{ transform: translate(-50%, -50%) rotate(360deg) scale(1); opacity: 0.5; }}
-            }}
-            
-            .logo-icon .sun::after {{
-                content: '';
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                width: 30px;
-                height: 30px;
-                transform: translate(-50%, -50%);
-                background: radial-gradient(circle, rgba(255, 255, 255, 0.6) 0%, transparent 70%);
-                border-radius: 50%;
-                animation: sunGlare 4s ease-in-out infinite;
-            }}
-            
-            @keyframes sunGlare {{
-                0%, 100% {{ opacity: 0.4; transform: translate(-50%, -50%) scale(0.8); }}
-                50% {{ opacity: 0.8; transform: translate(-50%, -50%) scale(1.1); }}
             }}
             
             .logo-text h1 {{
                 font-size: 1.5rem;
                 font-weight: 900;
-                background: linear-gradient(135deg, #DC143C 0%, #06b6d4 50%, #228B22 100%);
+                background: linear-gradient(135deg, #22d3ee 0%, #38bdf8 40%, #a5f3fc 80%, #e5e7eb 100%);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
@@ -2580,7 +3506,7 @@ async def dashboard() -> HTMLResponse:
             
             .logo-text p {{
                 font-size: 0.75rem;
-                background: linear-gradient(90deg, #DC143C 0%, #06b6d4 50%, #228B22 100%);
+                            background: linear-gradient(90deg, #22d3ee 0%, #2dd4bf 50%, #4ade80 100%);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
@@ -2702,7 +3628,7 @@ async def dashboard() -> HTMLResponse:
                 color: rgba(255, 255, 255, 0.95);
                 letter-spacing: 0.03em;
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: linear-gradient(135deg, #DC143C 0%, #06b6d4 50%, #228B22 100%);
+                background: linear-gradient(135deg, #22d3ee 0%, #2dd4bf 50%, #4ade80 100%);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
@@ -2724,7 +3650,7 @@ async def dashboard() -> HTMLResponse:
             
             .kurdish-text::after {{
                 content: '|';
-                color: #06b6d4;
+                color: #22d3ee;
                 animation: cursorBlink 0.7s infinite;
                 margin-left: 2px;
             }}
@@ -2963,12 +3889,19 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                transition: all 0.2s;
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
                 user-select: none;
+                -webkit-tap-highlight-color: transparent;
+                will-change: background, transform;
             }}
             
             .subject-header:hover {{
                 background: rgba(0, 217, 255, 0.05);
+                transform: translateX(2px);
+            }}
+            
+            .subject-header:active {{
+                transform: translateX(1px) scale(0.99);
             }}
             
             .subject-header:focus, .subject-header:active {{
@@ -3010,17 +3943,33 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                transition: all 0.3s;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                will-change: transform, background;
             }}
             
             .collapse-btn:hover {{
                 background: var(--bg-tertiary);
                 transform: scale(1.1);
+                border-color: var(--accent);
+            }}
+            
+            .collapse-btn:active {{
+                transform: scale(0.95);
             }}
             
             .collapse-btn i {{
-                transition: transform 0.3s;
+                transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 transform: rotate(-90deg);
+                will-change: transform;
+            }}
+            
+            /* Smooth content transitions */
+            .subject-files,
+            .semester-results-content,
+            .semester-results-table,
+            .year-content {{
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                overflow: hidden;
             }}
             
             .subject-files {{
@@ -3490,7 +4439,7 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 gap: 1rem;
                 margin-bottom: 2rem;
-                padding: 0.5rem;
+                padding: 0.4rem;
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
                 border-radius: 20px;
@@ -3498,20 +4447,34 @@ async def dashboard() -> HTMLResponse:
             
             .zone-tab {{
                 flex: 1;
-                padding: 1rem 2rem;
+                padding: 0.9rem 1.6rem;
                 background: transparent;
                 border: none;
                 border-radius: 15px;
-                color: var(--text-tertiary);
-                font-size: 1rem;
+                color: var(--text-secondary);
+                font-size: 0.98rem;
                 font-weight: 600;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                gap: 0.75rem;
+                gap: 0.6rem;
                 cursor: pointer;
                 transition: all 0.3s ease;
                 position: relative;
+            }}
+
+            .zone-tab:not(.active) {{
+                background: rgba(255, 255, 255, 0.02);
+            }}
+
+            .zone-tab .tab-label {{
+                letter-spacing: 0.01em;
+            }}
+
+            .zone-tab .tab-meta {{
+                font-size: 0.82rem;
+                color: rgba(255, 255, 255, 0.72);
+                font-weight: 500;
             }}
             
             .zone-tab:hover {{
@@ -3524,6 +4487,10 @@ async def dashboard() -> HTMLResponse:
                 color: white;
                 box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
             }}
+
+            .zone-tab.active .tab-meta {{
+                color: rgba(255, 255, 255, 0.95);
+            }}
             
             .zone-tab i {{
                 font-size: 1.2rem;
@@ -3534,6 +4501,61 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .zone-content.active {{
+                display: block;
+            }}
+            
+            /* ===================================
+               PRIVATE MODE SUB-TABS
+               =================================== */
+            
+            .private-subtabs {{
+                display: flex;
+                gap: 1rem;
+                margin-bottom: 2rem;
+                padding: 0.5rem;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border);
+                border-radius: 15px;
+            }}
+            
+            .private-subtab {{
+                flex: 1;
+                padding: 0.875rem 1.5rem;
+                background: transparent;
+                border: none;
+                border-radius: 12px;
+                color: var(--text-secondary);
+                font-size: 0.95rem;
+                font-weight: 600;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 0.5rem;
+                cursor: pointer;
+                transition: all 0.3s ease;
+            }}
+            
+            .private-subtab:hover {{
+                color: var(--text-primary);
+                background: var(--glass);
+            }}
+            
+            .private-subtab.active {{
+                background: linear-gradient(135deg, var(--accent), var(--success));
+                color: white;
+                box-shadow: 0 8px 20px rgba(0, 217, 255, 0.25);
+            }}
+            
+            .private-subtab i {{
+                font-size: 1.1rem;
+            }}
+            
+            .private-section {{
+                display: none;
+                animation: fadeIn 0.3s ease;
+            }}
+            
+            .private-section.active {{
                 display: block;
             }}
             
@@ -3976,8 +4998,263 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .absence-list li:before {{
-                content: '📅';
+                content: '•';
                 font-size: 1rem;
+            }}
+            
+            /* ===================================
+               RESULTS TABLE STYLES
+               =================================== */
+            
+            .results-table-container {{
+                background: var(--bg-secondary);
+                border: 1px solid var(--border);
+                border-radius: 20px;
+                overflow: hidden;
+                margin-top: 2rem;
+                box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+            }}
+            
+            .results-table {{
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 0.95rem;
+            }}
+            
+            .results-table thead {{
+                background: linear-gradient(135deg, rgba(0, 217, 255, 0.1), rgba(0, 255, 136, 0.1));
+                border-bottom: 2px solid var(--accent);
+            }}
+            
+            .results-table thead th {{
+                padding: 1rem;
+                text-align: left;
+                color: var(--text-primary);
+                font-weight: 700;
+                font-size: 0.9rem;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                white-space: nowrap;
+            }}
+            
+            .results-table thead th i {{
+                margin-right: 0.5rem;
+                color: var(--accent);
+            }}
+            
+            .results-table tbody tr {{
+                border-bottom: 1px solid var(--border);
+                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                will-change: background, transform;
+            }}
+            
+            .results-table tbody tr:hover {{
+                background: var(--glass);
+                transform: translateX(2px);
+            }}
+            
+            .results-table tbody td {{
+                padding: 1rem;
+                color: var(--text-secondary);
+                vertical-align: middle;
+            }}
+            
+            .results-table .row-number {{
+                font-weight: 700;
+                color: var(--text-tertiary);
+                font-size: 0.9rem;
+                width: 50px;
+                text-align: center;
+            }}
+            
+            .results-table .subject-cell {{
+                font-weight: 600;
+                color: var(--text-primary);
+            }}
+            
+            .results-table .subject-cell strong {{
+                display: block;
+                color: var(--accent);
+            }}
+            
+            .results-table .score-cell {{
+                text-align: center;
+            }}
+            
+            .score-badge {{
+                display: inline-block;
+                padding: 0.375rem 0.875rem;
+                background: var(--bg-tertiary);
+                color: var(--text-primary);
+                border-radius: 20px;
+                font-weight: 700;
+                font-size: 0.9rem;
+                border: 1px solid var(--border);
+            }}
+            
+            .status-badge {{
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: 0.5rem 1rem;
+                border-radius: 20px;
+                font-weight: 600;
+                font-size: 0.85rem;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }}
+            
+            .status-badge i {{
+                font-size: 1rem;
+            }}
+            
+            .status-passed {{
+                background: rgba(0, 255, 136, 0.15);
+                color: var(--success);
+                border: 1px solid var(--success);
+            }}
+            
+            .status-failed {{
+                background: rgba(239, 68, 68, 0.15);
+                color: #ef4444;
+                border: 1px solid #ef4444;
+            }}
+            
+            .status-pending {{
+                background: rgba(255, 184, 0, 0.15);
+                color: #ffb800;
+                border: 1px solid #ffb800;
+            }}
+            
+            .results-table .date-cell {{
+                color: var(--text-tertiary);
+                font-size: 0.9rem;
+            }}
+            
+            /* Modern Subject Result Card Styles */
+            .subject-result-card {{
+                will-change: transform, box-shadow;
+            }}
+            
+            .subject-result-card .card-header {{
+                transition: background 0.3s ease;
+            }}
+            
+            .subject-result-card .assessment-item {{
+                will-change: border-color, background;
+            }}
+            
+            .subject-result-card .assessment-grid {{
+                animation: fadeIn 0.4s ease-out;
+            }}
+            
+            @keyframes fadeIn {{
+                from {{
+                    opacity: 0;
+                    transform: translateY(10px);
+                }}
+                to {{
+                    opacity: 1;
+                    transform: translateY(0);
+                }}
+            }}
+            
+            /* Responsive Modern Cards */
+            @media (max-width: 1200px) {{
+                .subject-result-card .card-body > div {{
+                    grid-template-columns: 1fr !important;
+                }}
+                
+                .subject-result-card .summary-panel {{
+                    max-width: 100% !important;
+                    display: grid !important;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 1rem;
+                }}
+                
+                .subject-result-card .summary-panel > div {{
+                    display: grid !important;
+                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    gap: 1rem;
+                    text-align: left !important;
+                }}
+                
+                .subject-result-card .grade-display {{
+                    margin-bottom: 0 !important;
+                }}
+            }}
+            
+            @media (max-width: 768px) {{
+                .subject-result-card .card-header > div {{
+                    flex-direction: column !important;
+                    align-items: flex-start !important;
+                }}
+                
+                .subject-result-card .status-badge-container {{
+                    width: 100%;
+                    justify-content: flex-start !important;
+                }}
+                
+                .subject-result-card .assessment-grid {{
+                    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
+                }}
+                
+                .subject-result-card .card-body {{
+                    padding: 1rem !important;
+                }}
+                
+                .semester-results-table {{
+                    padding: 1rem !important;
+                }}
+            }}
+            
+            @media (max-width: 480px) {{
+                .subject-result-card .assessment-grid {{
+                    grid-template-columns: 1fr 1fr !important;
+                }}
+                
+                .subject-result-card .subject-number {{
+                    width: 36px !important;
+                    height: 36px !important;
+                    font-size: 1rem !important;
+                }}
+                
+                .subject-result-card .course-name {{
+                    font-size: 0.95rem !important;
+                }}
+            }}
+            
+            /* Responsive table on mobile */
+            @media (max-width: 1024px) {{
+                .results-table-container {{
+                    overflow-x: auto;
+                }}
+                
+                .results-table {{
+                    min-width: 650px;
+                }}
+                
+                .results-table thead th {{
+                    padding: 0.75rem 0.5rem;
+                    font-size: 0.8rem;
+                }}
+                
+                .results-table tbody td {{
+                    padding: 0.75rem 0.5rem;
+                    font-size: 0.85rem;
+                }}
+            }}
+            
+            @media (max-width: 768px) {{
+                .results-table {{
+                    font-size: 0.8rem;
+                    min-width: 550px;
+                }}
+                
+                .score-badge, .status-badge {{
+                    padding: 0.25rem 0.625rem;
+                    font-size: 0.75rem;
+                }}
             }}
             
             /* Notification System - Top Smooth */
@@ -4047,8 +5324,10 @@ async def dashboard() -> HTMLResponse:
                 .modal-header {{ padding: 1.5rem; }}
                 .modal-body {{ padding: 1.5rem; }}
                 
-                .zone-tabs {{ flex-direction: column; gap: 0.5rem; }}
-                .zone-tab {{ padding: 0.75rem 1.5rem; }}
+                .zone-tabs {{ flex-direction: column; gap: 0.35rem; margin-bottom: 1.25rem; padding: 0.35rem; }}
+                .zone-tab {{ padding: 0.6rem 1rem; font-size: 0.9rem; border-radius: 12px; gap: 0.45rem; }}
+                .zone-tab i {{ font-size: 1rem; }}
+                .zone-tab .tab-meta {{ font-size: 0.72rem; }}
                 .attendance-login-card {{ padding: 2rem 1.5rem; }}
                 .attendance-header {{ flex-direction: column; gap: 1rem; align-items: flex-start; }}
                 
@@ -4301,13 +5580,11 @@ async def dashboard() -> HTMLResponse:
             <nav class="nav">
                 <div class="logo">
                     <div class="logo-icon">
-                        <div class="flag-center">
-                            <div class="sun"></div>
-                        </div>
+                        <img src="/static/icons/me.png?v={logo_version}" alt="SwiftSync Logo" />
                     </div>
                     <div class="logo-text">
                         <h1>SwiftSync</h1>
-                        <p>SSCreative</p>
+                        <!--<p>SSCreative</p>-->
                     </div>
                 </div>
                 
@@ -4331,11 +5608,13 @@ async def dashboard() -> HTMLResponse:
             <div class="zone-tabs" style="animation: fadeIn 0.5s ease 0.1s both">
                 <button class="zone-tab active" onclick="switchZone('lectures')" id="lecturesTab">
                     <i class="fas fa-book-open"></i>
-                    <span>Lectures (Public)</span>
+                    <span class="tab-label">Lectures</span>
+                    <span class="tab-meta">(Public)</span>
                 </button>
-                <button class="zone-tab" onclick="switchZone('attendance')" id="attendanceTab">
-                    <i class="fas fa-lock"></i>
-                    <span>Attendance (Private)</span>
+                <button class="zone-tab" onclick="switchZone('private')" id="privateTab">
+                    <i class="fas fa-user-shield"></i>
+                    <span class="tab-label">Attendance</span>
+                    <span class="tab-meta">(Private)</span>
                 </button>
             </div>
             
@@ -4409,15 +5688,17 @@ async def dashboard() -> HTMLResponse:
             </div> <!-- End Lectures Zone -->
             
             <!-- PRIVATE ZONE: Attendance -->
-            <div id="attendanceZone" class="zone-content">
-                <div id="attendanceLoginArea">
+            <!-- PRIVATE MODE: Unified Attendance + Results -->
+            <div id="privateZone" class="zone-content">
+                <!-- Login Area (shared for both attendance and results) -->
+                <div id="privateLoginArea">
                     <div class="attendance-login-card">
                         <div class="login-header">
                             <div class="login-icon">
                                 <i class="fas fa-user-lock"></i>
                             </div>
-                            <h2>Attendance Login</h2>
-                            <p>Use your university credentials to view attendance</p>
+                            <h2>Student Login</h2>
+                            <p>Access your attendance records and exam results</p>
                         </div>
                         <form id="attendanceLoginForm" onsubmit="loginAttendance(event)">
                             <div class="form-group">
@@ -4450,23 +5731,58 @@ async def dashboard() -> HTMLResponse:
                     </div>
                 </div>
                 
-                <div id="attendanceDataArea" style="display: none;">
+                <!-- Data Area (shown after login) -->
+                <div id="privateDataArea" style="display: none;">
                     <div class="attendance-header">
                         <h2>
-                            <i class="fas fa-user-check"></i> 
-                            <span id="studentNameDisplay">Your Attendance Record</span>
+                            <i class="fas fa-user-graduate"></i> 
+                            <span id="studentNameDisplay">Student Portal</span>
                         </h2>
                         <button class="logout-btn" onclick="logoutAttendance()">
                             <i class="fas fa-sign-out-alt"></i>
                             <span>Logout</span>
                         </button>
                     </div>
-                    <div id="attendanceContent" class="attendance-content-wrapper">
-                        <!-- Attendance data will be rendered here -->
+                    
+                    <!-- Internal Sub-tabs for Attendance, Result Alerts & Results -->
+                    <div class="private-subtabs">
+                        <button class="private-subtab active" onclick="switchPrivateSection('attendance')" id="attendanceSubtab">
+                            <i class="fas fa-user-check"></i>
+                            <span>Attendance</span>
+                        </button>
+                        <button class="private-subtab" onclick="switchPrivateSection('result-alerts')" id="resultAlertsSubtab">
+                            <i class="fas fa-bell"></i>
+                            <span>Result Alerts</span>
+                        </button>
+                        <button class="private-subtab" onclick="switchPrivateSection('official-results')" id="officialResultsSubtab">
+                            <i class="fas fa-trophy"></i>
+                            <span>Results</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Attendance Section -->
+                    <div id="attendanceSection" class="private-section active">
+                        <div id="attendanceContent" class="attendance-content-wrapper">
+                            <!-- Attendance data will be rendered here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Result Alerts Section (Notification-based) -->
+                    <div id="resultAlertsSection" class="private-section">
+                        <div id="resultsContent" class="attendance-content-wrapper">
+                            <!-- Result alerts from notifications will be rendered here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Official Results Section (StudentResult API) -->
+                    <div id="officialResultsSection" class="private-section">
+                        <div id="officialResultsContent" class="attendance-content-wrapper">
+                            <!-- Official results from StudentResult endpoint will be rendered here -->
+                        </div>
                     </div>
                 </div>
             </div>
-            <!-- End Attendance Zone -->
+            <!-- End Private Zone -->
             
         </div>
         
@@ -4489,10 +5805,254 @@ async def dashboard() -> HTMLResponse:
         </div>
         
         <script>
+            // ===================================
+            // GLOBAL VARIABLES - DECLARE FIRST
+            // ===================================
+            
+            // Safe localStorage wrapper to prevent access errors
+            var safeStorage = {{
+                _setCookie: function(name, value, days) {{
+                    var expires = "";
+                    if (days) {{
+                        var date = new Date();
+                        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+                        expires = "; expires=" + date.toUTCString();
+                    }}
+                    var isSecure = window.location.protocol === 'https:';
+                    var sameSite = isSecure ? 'SameSite=None; Secure' : 'SameSite=Lax';
+                    document.cookie = name + "=" + (value || "") + expires + "; path=/; " + sameSite;
+                }},
+                _getCookie: function(name) {{
+                    var nameEQ = name + "=";
+                    var ca = document.cookie.split(';');
+                    for (var i = 0; i < ca.length; i++) {{
+                        var c = ca[i];
+                        while (c.charAt(0) == ' ') c = c.substring(1, c.length);
+                        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
+                    }}
+                    return null;
+                }},
+                _deleteCookie: function(name) {{
+                    document.cookie = name + '=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+                }},
+                getItem: function(key) {{
+                    try {{
+                        var value = localStorage.getItem(key);
+                        if (!value) {{
+                            value = this._getCookie(key);
+                            if (value) {{
+                                try {{
+                                    localStorage.setItem(key, value);
+                                }} catch (e) {{}}
+                            }}
+                        }}
+                        return value;
+                    }} catch (e) {{
+                        return this._getCookie(key);
+                    }}
+                }},
+                setItem: function(key, value) {{
+                    try {{
+                        localStorage.setItem(key, value);
+                        this._setCookie(key, value, 7);
+                        return true;
+                    }} catch (e) {{
+                        this._setCookie(key, value, 7);
+                        return false;
+                    }}
+                }},
+                removeItem: function(key) {{
+                    try {{
+                        localStorage.removeItem(key);
+                    }} catch (e) {{}}
+                    this._deleteCookie(key);
+                }}
+            }};
+            
+            // Attendance variables - Use safe storage
+            var attendanceSessionToken = safeStorage.getItem('attendance_session_token') || null;
+            var attendanceUsername = safeStorage.getItem('attendance_username') || null;
+            var attendanceRefreshInterval = null;
+            
+            // Data cache for private sections (cleared on logout)
+            var cachedResultAlerts = null;
+            var cachedOfficialResults = null;
+            var cachedAttendanceData = null;
+
+            // Cache timestamps (avoid immediate duplicate refreshes)
+            var cachedResultAlertsAt = 0;
+            var cachedOfficialResultsAt = 0;
+            var cachedAttendanceAt = 0;
+
+            // Prevent duplicate requests + prevent cross-user cache bleed
+            var privateCacheOwnerKey = null;
+            var inFlightAttendance = null;
+            var inFlightResultAlerts = null;
+            var inFlightOfficialResults = null;
+
+            // LocalStorage-only persistence for private data (DO NOT use cookies)
+            // This makes Result Alerts + Results behave like Attendance across refresh.
+            // Bump when the shape/meaning of persisted private payloads changes
+            var PRIVATE_CACHE_VERSION = 2;
+            var PRIVATE_CACHE_PREFIX = 'swiftsync_private_cache_v' + PRIVATE_CACHE_VERSION;
+
+            function localOnlyGet(key) {{
+                try {{
+                    return localStorage.getItem(key);
+                }} catch (e) {{
+                    return null;
+                }}
+            }}
+
+            function localOnlySet(key, value) {{
+                try {{
+                    localStorage.setItem(key, value);
+                    return true;
+                }} catch (e) {{
+                    return false;
+                }}
+            }}
+
+            function localOnlyRemove(key) {{
+                try {{
+                    localStorage.removeItem(key);
+                }} catch (e) {{}}
+            }}
+
+            function getPrivateCacheStorageKey(kind, ownerKey) {{
+                const owner = ownerKey || privateCacheOwnerKey || getPrivateOwnerKey();
+                if (!owner) return null;
+                const safeOwner = encodeURIComponent(owner);
+                return `${{PRIVATE_CACHE_PREFIX}}:${{safeOwner}}:${{kind}}`;
+            }}
+
+            function persistPrivateCache(kind, payload) {{
+                const key = getPrivateCacheStorageKey(kind);
+                if (!key) return false;
+                const record = {{ v: PRIVATE_CACHE_VERSION, at: Date.now(), data: payload }};
+                return localOnlySet(key, JSON.stringify(record));
+            }}
+
+            function readPersistedPrivateCache(kind) {{
+                const key = getPrivateCacheStorageKey(kind);
+                if (!key) return null;
+                const raw = localOnlyGet(key);
+                if (!raw) return null;
+                try {{
+                    const record = JSON.parse(raw);
+                    if (!record || record.v !== PRIVATE_CACHE_VERSION) return null;
+                    // Keep caches only within session duration window for safety
+                    if (record.at && (Date.now() - record.at) > SESSION_DURATION) return null;
+                    return record;
+                }} catch (e) {{
+                    return null;
+                }}
+            }}
+
+            function purgePersistedPrivateCaches(ownerKey) {{
+                const kinds = ['attendance', 'result_alerts', 'official_results'];
+                kinds.forEach(kind => {{
+                    const key = getPrivateCacheStorageKey(kind, ownerKey);
+                    if (key) localOnlyRemove(key);
+                }});
+            }}
+
+            function rehydratePrivateCaches() {{
+                ensurePrivateCacheOwner();
+                if (!privateCacheOwnerKey) return;
+
+                const att = readPersistedPrivateCache('attendance');
+                if (att && att.data && att.data.html) {{
+                    cachedAttendanceData = att.data;
+                    cachedAttendanceAt = att.at || 0;
+                }}
+
+                const alerts = readPersistedPrivateCache('result_alerts');
+                if (alerts && alerts.data && Array.isArray(alerts.data.results)) {{
+                    cachedResultAlerts = alerts.data;
+                    cachedResultAlertsAt = alerts.at || 0;
+                }}
+
+                const results = readPersistedPrivateCache('official_results');
+                if (results && Array.isArray(results.data)) {{
+                    cachedOfficialResults = results.data;
+                    cachedOfficialResultsAt = results.at || 0;
+                }}
+            }}
+
+            function getPrivateOwnerKey() {{
+                // Scope private caches to the currently authenticated identity
+                // Prefer username (stable across refresh), fall back to token
+                return attendanceUsername || safeStorage.getItem('attendance_username') || attendanceSessionToken || '';
+            }}
+
+            function clearPrivateCaches() {{
+                cachedResultAlerts = null;
+                cachedOfficialResults = null;
+                cachedAttendanceData = null;
+                cachedResultAlertsAt = 0;
+                cachedOfficialResultsAt = 0;
+                cachedAttendanceAt = 0;
+                privateCacheOwnerKey = null;
+                // Drop references to in-flight promises (results will be ignored via guards)
+                inFlightAttendance = null;
+                inFlightResultAlerts = null;
+                inFlightOfficialResults = null;
+            }}
+
+            function ensurePrivateCacheOwner() {{
+                const key = getPrivateOwnerKey();
+                if (!key) return;
+                if (privateCacheOwnerKey && privateCacheOwnerKey !== key) {{
+                    const prev = privateCacheOwnerKey;
+                    clearPrivateCaches();
+                    // Safety: do not keep other student's cached private payloads around
+                    purgePersistedPrivateCaches(prev);
+                }}
+                privateCacheOwnerKey = key;
+            }}
+
+            function shouldBackgroundRefresh(cachedAt, maxAgeMs = 30000) {{
+                if (!cachedAt) return true;
+                return (Date.now() - cachedAt) > maxAgeMs;
+            }}
+
+            function preloadPrivateData(options = {{}}) {{
+                if (!attendanceSessionToken) return;
+                ensurePrivateCacheOwner();
+
+                const skipAttendance = options.skipAttendance === true;
+                const forceRefresh = options.forceRefresh === true;
+                if (!skipAttendance && !cachedAttendanceData && !inFlightAttendance) {{
+                    // Silent load, no spinners (used mainly for session restore)
+                    loadAttendanceData(true);
+                }}
+
+                if (!inFlightResultAlerts) {{
+                    if (forceRefresh || !cachedResultAlerts || shouldBackgroundRefresh(cachedResultAlertsAt)) {{
+                        fetchResultAlerts(true);
+                    }}
+                }}
+
+                if (!inFlightOfficialResults) {{
+                    if (forceRefresh || !cachedOfficialResults || shouldBackgroundRefresh(cachedOfficialResultsAt)) {{
+                        fetchOfficialResults(true);
+                    }}
+                }}
+            }}
+            
+            // Lectures data variables
+            let allFilesData = {{}};
+            let originalFilesData = {{}}; // Keep original data for search reset
+            
+            // ===================================
+            // KURDISH TEXT ANIMATION
+            // ===================================
+            
             // Kurdish Text Typewriter Animation
             const kurdishTexts = [
-                'ڕۆژئاوا ڕۆژهەڵاتە،کوردستان یەک وڵاتە ',
-                'Rojava Rojhilat e,Kurdistan yek welat e '
+                'جــەژنــتــــــان پــیــــرۆز بـــێــت',
+                'E I D     M U B A R A K ',
             ];
             
             let currentTextIndex = 0;
@@ -4558,9 +6118,10 @@ async def dashboard() -> HTMLResponse:
                 }}
             }});
             
-            let allFilesData = {{}};
-            let originalFilesData = {{}}; // Keep original data for search reset
+            // Session management - 7 days expiration
+            var SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
             
+            // Session helper functions
             function formatBytes(bytes) {{
                 if (bytes === 0) return '0 B';
                 const k = 1024;
@@ -4594,6 +6155,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             function renderFiles(data, isFiltering = false) {{
+                console.log('🎨 Rendering files...', data);
                 // Only update original data on initial load, not during filtering
                 if (!isFiltering) {{
                     allFilesData = data;
@@ -4601,6 +6163,7 @@ async def dashboard() -> HTMLResponse:
                 }}
                 const fileGrid = document.getElementById('fileGrid');
                 const semesters = Object.keys(data);
+                console.log('📚 Semesters found:', semesters);
                 
                 if (semesters.length === 0) {{
                     fileGrid.innerHTML = `
@@ -4665,7 +6228,13 @@ async def dashboard() -> HTMLResponse:
                     `;
                     
                     // Subjects within semester
-                    subjectNames.sort().forEach(subject => {{
+                    subjectNames.sort((a, b) => {{
+                        const aIsOther = a.toLowerCase() === 'other';
+                        const bIsOther = b.toLowerCase() === 'other';
+                        if (aIsOther && !bIsOther) return 1;
+                        if (!aIsOther && bIsOther) return -1;
+                        return a.localeCompare(b);
+                    }}).forEach(subject => {{
                         const files = subjects[subject];
                         
                         html += `
@@ -4718,6 +6287,7 @@ async def dashboard() -> HTMLResponse:
                 document.getElementById('totalFiles').textContent = totalFiles;
                 document.getElementById('totalSize').textContent = formatBytes(totalSize);
                 document.getElementById('totalSubjects').textContent = totalSubjects;
+                console.log('✅ Stats updated:', {{totalFiles, totalSize, totalSubjects}});
             }}
             
             function toggleSubject(header) {{
@@ -4790,13 +6360,13 @@ async def dashboard() -> HTMLResponse:
                     const result = await response.json();
                     
                     if (result.success) {{
-                        showNotification('✅ Sync completed!', 'success');
+                        showNotification('Sync completed!', 'success');
                         loadFiles(); // Reload files
                     }} else {{
-                        showNotification(`❌ Sync failed: ${{result.error}}`, 'error');
+                        showNotification(`Sync failed: ${{result.error}}`, 'error');
                     }}
                 }} catch (error) {{
-                    showNotification(`❌ Error: ${{error.message}}`, 'error');
+                    showNotification(`Error: ${{error.message}}`, 'error');
                 }} finally {{
                     btn.disabled = false;
                     icon.classList.remove('fa-spin');
@@ -4833,7 +6403,7 @@ async def dashboard() -> HTMLResponse:
                 try {{
                     // OFFLINE CHECK: Don't attempt download if offline
                     if (!navigator.onLine) {{
-                        showNotification('❌ No internet connection', 'error');
+                        showNotification('No internet connection', 'error');
                         return;
                     }}
                     
@@ -4873,7 +6443,7 @@ async def dashboard() -> HTMLResponse:
                     }}, 2000);
                 }} catch (error) {{
                     // Only show notification on actual errors
-                    showNotification('❌ Download failed!', 'error');
+                    showNotification('Download failed!', 'error');
                     console.error('Download error:', error);
                 }}
             }}
@@ -4881,22 +6451,33 @@ async def dashboard() -> HTMLResponse:
             // Restore last active zone on page load (default to lectures)
             window.addEventListener('load', () => {{
                 const lastZone = localStorage.getItem('lastActiveZone');
-                // Always default to lectures unless explicitly on attendance
-                if (lastZone && lastZone === 'attendance') {{
-                    // Don't auto-switch to attendance, keep lectures as default
+                const lastPrivateSection = localStorage.getItem('lastPrivateSection');
+                
+                // Always default to lectures unless explicitly on private
+                if (lastZone && lastZone === 'private') {{
+                    // Don't auto-switch to private, keep lectures as default
                 }}
+                
+                // Restore last private section if applicable
+                if (lastPrivateSection && (lastPrivateSection === 'result-alerts' || lastPrivateSection === 'official-results')) {{
+                    // Will be restored when private mode is activated by checkAttendanceSession
+                }}
+                
                 // Lectures is already active by default in HTML
             }});
             
             // Load files on page load
             async function loadFiles() {{
                 try {{
+                    console.log('📡 Fetching lectures from API...');
+                    
                     // OFFLINE CHECK: Show cached data or friendly message
                     if (!navigator.onLine) {{
                         console.log('📴 Offline - attempting to load cached data');
                     }}
                     
                     const response = await fetch('/api/files');
+                    console.log('✅ API response received:', response.status);
                     
                     // Handle offline or network errors gracefully
                     if (!response.ok) {{
@@ -4904,6 +6485,7 @@ async def dashboard() -> HTMLResponse:
                     }}
                     
                     const data = await response.json();
+                    console.log('📊 Data loaded:', Object.keys(data).length, 'semesters');
                     renderFiles(data);
                 }} catch (error) {{
                     console.error('❌ Error loading files:', error);
@@ -4918,7 +6500,7 @@ async def dashboard() -> HTMLResponse:
                             <i class="fas fa-${{!navigator.onLine ? 'wifi-slash' : 'exclamation-triangle'}}"></i>
                             <h3>${{!navigator.onLine ? 'No Internet Connection' : 'Error Loading Files'}}</h3>
                             <p>${{errorMsg}}</p>
-                            <button onclick="loadFiles()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                            <button onclick="loadFiles()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: var(--accent); color: white; border: none; border-radius: 8px; cursor: pointer;">
                                 <i class="fas fa-sync"></i> Retry
                             </button>
                         </div>
@@ -4926,8 +6508,20 @@ async def dashboard() -> HTMLResponse:
                 }}
             }}
             
-            // Initialize
-            loadFiles();
+            // Initialize - Load files immediately  
+            console.log('🚀 Initializing dashboard...');
+            
+            // Make sure DOM is fully loaded
+            if (document.readyState === 'loading') {{
+                document.addEventListener('DOMContentLoaded', () => {{
+                    console.log('📄 DOM loaded, calling loadFiles()...');
+                    loadFiles();
+                }});
+            }} else {{
+                // DOM already loaded
+                console.log('📄 DOM already ready, calling loadFiles()...');
+                loadFiles();
+            }}
             
             // ===== AI SUMMARIZATION FUNCTIONS =====
             
@@ -5115,89 +6709,12 @@ async def dashboard() -> HTMLResponse:
             // GLOBAL VARIABLES - MUST BE DECLARED FIRST
             // ===================================
             
-            // Safe localStorage wrapper to prevent access errors
-            // Uses cookies as fallback for mobile browsers that clear localStorage
-            var safeStorage = {{
-                // Helper: Set cookie
-                _setCookie: function(name, value, days) {{
-                    var expires = "";
-                    if (days) {{
-                        var date = new Date();
-                        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-                        expires = "; expires=" + date.toUTCString();
-                    }}
-                    // Use SameSite=None with Secure for HTTPS (production), Lax for HTTP (localhost)
-                    var isSecure = window.location.protocol === 'https:';
-                    var sameSite = isSecure ? 'SameSite=None; Secure' : 'SameSite=Lax';
-                    document.cookie = name + "=" + (value || "") + expires + "; path=/; " + sameSite;
-                }},
-                // Helper: Get cookie
-                _getCookie: function(name) {{
-                    var nameEQ = name + "=";
-                    var ca = document.cookie.split(';');
-                    for (var i = 0; i < ca.length; i++) {{
-                        var c = ca[i];
-                        while (c.charAt(0) == ' ') c = c.substring(1, c.length);
-                        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
-                    }}
-                    return null;
-                }},
-                // Helper: Delete cookie
-                _deleteCookie: function(name) {{
-                    document.cookie = name + '=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-                }},
-                
-                getItem: function(key) {{
-                    try {{
-                        var value = localStorage.getItem(key);
-                        // If localStorage is empty, try cookie fallback
-                        if (!value) {{
-                            value = this._getCookie(key);
-                            // If found in cookie, restore to localStorage
-                            if (value) {{
-                                try {{
-                                    localStorage.setItem(key, value);
-                                }} catch (e) {{
-                                    // localStorage write failed, cookie will be used
-                                }}
-                            }}
-                        }}
-                        return value;
-                    }} catch (e) {{
-                        console.warn('localStorage access denied, using cookie:', e);
-                        return this._getCookie(key);
-                    }}
-                }},
-                setItem: function(key, value) {{
-                    try {{
-                        localStorage.setItem(key, value);
-                        // Also save to cookie as backup (7 days)
-                        this._setCookie(key, value, 7);
-                        return true;
-                    }} catch (e) {{
-                        console.warn('localStorage write denied, using cookie:', e);
-                        this._setCookie(key, value, 7);
-                        return false;
-                    }}
-                }},
-                removeItem: function(key) {{
-                    try {{
-                        localStorage.removeItem(key);
-                    }} catch (e) {{
-                        console.warn('localStorage remove denied:', e);
-                    }}
-                    // Also remove cookie
-                    this._deleteCookie(key);
-                }}
-            }};
+            // ===================================
+            // ATTENDANCE SESSION MANAGEMENT
+            // ===================================
             
-            // Attendance variables - Use safe storage
-            var attendanceSessionToken = safeStorage.getItem('attendance_session_token') || null;
-            var attendanceUsername = safeStorage.getItem('attendance_username') || null;
-            var attendanceRefreshInterval = null;
-            
-            // Session management - 7 days expiration
-            var SESSION_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+            // Session management - already declared at top
+            // SESSION_DURATION already defined
             
             // Session helper functions
             function updateSessionTimestamp() {{
@@ -5237,13 +6754,80 @@ async def dashboard() -> HTMLResponse:
                     document.getElementById('lecturesTab').classList.add('active');
                     document.getElementById('lecturesZone').classList.add('active');
                     localStorage.setItem('lastActiveZone', 'lectures');
-                }} else if (zone === 'attendance') {{
-                    document.getElementById('attendanceTab').classList.add('active');
-                    document.getElementById('attendanceZone').classList.add('active');
-                    localStorage.setItem('lastActiveZone', 'attendance');
+                }} else if (zone === 'private') {{
+                    document.getElementById('privateTab').classList.add('active');
+                    document.getElementById('privateZone').classList.add('active');
+                    localStorage.setItem('lastActiveZone', 'private');
                     
                     // Check if user has a saved session
                     checkAttendanceSession();
+                }}
+            }}
+            
+            // Switch between Attendance, Result Alerts, and Official Results within Private Mode
+            function switchPrivateSection(section) {{
+                // Update subtabs
+                document.querySelectorAll('.private-subtab').forEach(tab => tab.classList.remove('active'));
+                document.querySelectorAll('.private-section').forEach(content => content.classList.remove('active'));
+                
+                if (section === 'attendance') {{
+                    document.getElementById('attendanceSubtab').classList.add('active');
+                    document.getElementById('attendanceSection').classList.add('active');
+                    localStorage.setItem('lastPrivateSection', 'attendance');
+                }} else if (section === 'result-alerts') {{
+                    document.getElementById('resultAlertsSubtab').classList.add('active');
+                    document.getElementById('resultAlertsSection').classList.add('active');
+                    localStorage.setItem('lastPrivateSection', 'result-alerts');
+                    
+                    // Load result alerts - use cache if available
+                    if (attendanceSessionToken) {{
+                        if (cachedResultAlerts) {{
+                            // Instantly show cached data
+                            renderResultsCards(cachedResultAlerts.results, cachedResultAlerts.totalCount);
+                            // Optional: background refresh without showing spinner (avoid immediate duplicates)
+                            if (shouldBackgroundRefresh(cachedResultAlertsAt)) {{
+                                fetchResultAlerts(true);
+                            }}
+                        }} else if (inFlightResultAlerts) {{
+                            // Preload already running - show loading UI but don't duplicate request
+                            document.getElementById('resultsContent').innerHTML = `
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                    <p style="color: var(--text-secondary)">Loading result alerts...</p>
+                                </div>
+                            `;
+                        }} else {{
+                            // First load - fetch with loading spinner
+                            fetchResultAlerts(false);
+                        }}
+                    }}
+                }} else if (section === 'official-results') {{
+                    document.getElementById('officialResultsSubtab').classList.add('active');
+                    document.getElementById('officialResultsSection').classList.add('active');
+                    localStorage.setItem('lastPrivateSection', 'official-results');
+                    
+                    // Load official results - use cache if available
+                    if (attendanceSessionToken) {{
+                        if (cachedOfficialResults) {{
+                            // Instantly show cached data
+                            renderOfficialResults(cachedOfficialResults);
+                            // Optional: background refresh without showing spinner (avoid immediate duplicates)
+                            if (shouldBackgroundRefresh(cachedOfficialResultsAt)) {{
+                                fetchOfficialResults(true);
+                            }}
+                        }} else if (inFlightOfficialResults) {{
+                            // Preload already running - show loading UI but don't duplicate request
+                            document.getElementById('officialResultsContent').innerHTML = `
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                    <p style="color: var(--text-secondary)">Loading official results...</p>
+                                </div>
+                            `;
+                        }} else {{
+                            // First load - fetch with loading spinner
+                            fetchOfficialResults(false);
+                        }}
+                    }}
                 }}
             }}
             
@@ -5256,6 +6840,8 @@ async def dashboard() -> HTMLResponse:
                 if (attendanceSessionToken && isSessionExpired()) {{
                     console.log('Session expired, clearing...');
                     // Clear expired session
+                    // Purge persisted private caches for this user
+                    purgePersistedPrivateCaches(getPrivateOwnerKey());
                     attendanceSessionToken = null;
                     safeStorage.removeItem('attendance_session_token');
                     safeStorage.removeItem('attendance_session_timestamp');
@@ -5279,17 +6865,36 @@ async def dashboard() -> HTMLResponse:
                     }} catch (e) {{
                         console.error('Failed to load saved credentials');
                         // Show login form
-                        document.getElementById('attendanceLoginArea').style.display = 'block';
-                        document.getElementById('attendanceDataArea').style.display = 'none';
+                        document.getElementById('privateLoginArea').style.display = 'block';
+                        document.getElementById('privateDataArea').style.display = 'none';
                     }}
                 }} else if (attendanceSessionToken) {{
                     // User has a valid session, try to load attendance data
                     updateSessionTimestamp(); // Refresh session
-                    loadAttendanceData();
+                    ensurePrivateCacheOwner();
+
+                    // Rehydrate all private caches from localStorage so tabs are instant after refresh
+                    rehydratePrivateCaches();
+
+                    // If we already have cached attendance, paint instantly then refresh silently
+                    if (cachedAttendanceData && cachedAttendanceData.html) {{
+                        document.getElementById('privateLoginArea').style.display = 'none';
+                        document.getElementById('privateDataArea').style.display = 'block';
+                        renderAttendanceCards(cachedAttendanceData.html, cachedAttendanceData.fullName || attendanceUsername);
+                        loadAttendanceData(true);
+                    }} else {{
+                        loadAttendanceData(false);
+                    }}
+
+                    // Preload the other private sections in background
+                    preloadPrivateData({{ skipAttendance: true }});
+
+                    // Ensure auto-refresh continues for attendance
+                    startAttendanceAutoRefresh();
                 }} else {{
                     // Show login form
-                    document.getElementById('attendanceLoginArea').style.display = 'block';
-                    document.getElementById('attendanceDataArea').style.display = 'none';
+                    document.getElementById('privateLoginArea').style.display = 'block';
+                    document.getElementById('privateDataArea').style.display = 'none';
                 }}
             }}
             
@@ -5303,7 +6908,14 @@ async def dashboard() -> HTMLResponse:
                 attendanceRefreshInterval = setInterval(() => {{
                     if (attendanceSessionToken) {{
                         console.log('Auto-refreshing attendance data...');
-                        loadAttendanceData(true); // true = silent refresh
+                        // Silent attendance refresh
+                        loadAttendanceData(true);
+
+                        // Also refresh Result Alerts + Results in the
+                        // background so new notifications and official
+                        // results are synced automatically for this
+                        // logged-in student.
+                        preloadPrivateData({{ skipAttendance: true }});
                     }}
                 }}, 60000); // 60 seconds
             }}
@@ -5353,6 +6965,12 @@ async def dashboard() -> HTMLResponse:
                         attendanceUsername = result.username;
                         safeStorage.setItem('attendance_session_token', attendanceSessionToken);
                         safeStorage.setItem('attendance_username', attendanceUsername);
+
+                        // New authenticated identity: scope caches to this user
+                        ensurePrivateCacheOwner();
+
+                        // If this student has persisted caches from a previous session, rehydrate for instant tabs
+                        rehydratePrivateCaches();
                         
                         // Set session timestamp (7 days expiration)
                         updateSessionTimestamp();
@@ -5364,9 +6982,33 @@ async def dashboard() -> HTMLResponse:
                         }} else {{
                             safeStorage.removeItem('attendance_credentials');
                         }}
-                        
-                        // Load attendance data
-                        await loadAttendanceData();
+
+                        // Fetch ALL private data during login loading, so tabs are instant after login.
+                        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Loading your data...</span>';
+
+                        // Start in parallel (silent to avoid spinners in hidden sections)
+                        const resultAlertsPromise = fetchResultAlerts(true).catch(() => null);
+                        const officialResultsPromise = fetchOfficialResults(true).catch(() => null);
+                        const attendancePromise = loadAttendanceData(false, true);
+
+                        // Attendance is required to enter private mode
+                        await attendancePromise;
+                        // Wait for the other private sections to finish so they don't show loading after login
+                        await Promise.allSettled([resultAlertsPromise, officialResultsPromise]);
+
+                        // Now reveal private mode UI (everything should be ready)
+                        document.getElementById('privateLoginArea').style.display = 'none';
+                        document.getElementById('privateDataArea').style.display = 'block';
+
+                        // Restore last private section (attendance, result-alerts, or official-results)
+                        const lastPrivateSection = localStorage.getItem('lastPrivateSection');
+                        if (lastPrivateSection === 'result-alerts') {{
+                            switchPrivateSection('result-alerts');
+                        }} else if (lastPrivateSection === 'official-results') {{
+                            switchPrivateSection('official-results');
+                        }} else {{
+                            switchPrivateSection('attendance');
+                        }}
                         
                         // Start auto-refresh
                         startAttendanceAutoRefresh();
@@ -5374,6 +7016,11 @@ async def dashboard() -> HTMLResponse:
                         console.log('✅ Login successful - session valid for 7 days');
                     }} else {{
                         alert(`Login failed: ${{result.error}}`);
+
+                        // Safety: ensure stale private caches aren't kept after failed login
+                        clearPrivateCaches();
+                        purgePersistedPrivateCaches(username);
+
                         // Reset button
                         submitBtn.disabled = false;
                         submitBtn.classList.remove('loading');
@@ -5381,6 +7028,11 @@ async def dashboard() -> HTMLResponse:
                     }}
                 }} catch (error) {{
                     alert(`Login error: ${{error.message}}`);
+
+                    // Safety: ensure stale private caches aren't kept after failed login
+                    clearPrivateCaches();
+                    purgePersistedPrivateCaches(username);
+
                     submitBtn.disabled = false;
                     submitBtn.classList.remove('loading');
                     submitBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i><span>Login Securely</span>';
@@ -5395,15 +7047,9 @@ async def dashboard() -> HTMLResponse:
                     const isStudentId = /^B\\d+$/.test(fullName);
                     
                     if (isStudentId) {{
-                        // Check for specific user ID and add custom label
-                        let customLabel = '';
-                        if (fullName === 'Alwand Jalal Abdullah') {{
-                            customLabel = ' <span style="color: #ff6b6b; font-weight: bold;">دارەتوویم نامەرد</span>';
-                        }}
-                        
                         // Show student ID with a friendly message
                         document.getElementById('studentNameDisplay').innerHTML = `
-                            <span style="color: var(--accent);">Welcome</span> <span style="font-weight: 600;">${{fullName}}${{customLabel}}</span>
+                            <span style="color: var(--accent);">Welcome</span> <span style="font-weight: 600;">${{fullName}}</span>
                             <small style="display: block; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
                                 📝 To show your name instead of ID, contact the administrator
                             </small>
@@ -5569,14 +7215,45 @@ async def dashboard() -> HTMLResponse:
                 document.getElementById('attendanceContent').innerHTML = htmlContent;
             }}
             
-            async function loadAttendanceData(silentRefresh = false) {{
+            async function loadAttendanceData(silentRefresh = false, deferUiReveal = false) {{
                 if (!attendanceSessionToken) {{
                     return;
                 }}
+
+                ensurePrivateCacheOwner();
+
+                // Deduplicate concurrent loads (preload + tab switches + auto-refresh)
+                if (inFlightAttendance) {{
+                    if (!silentRefresh && !cachedAttendanceData) {{
+                        document.getElementById('attendanceContent').innerHTML = `
+                            <div class="loading">
+                                <div class="spinner"></div>
+                                <p style="color: var(--text-secondary)">Loading attendance data...</p>
+                            </div>
+                        `;
+                    }}
+                    return inFlightAttendance;
+                }}
                 
-                // Show attendance area with loading (unless silent refresh)
-                document.getElementById('attendanceLoginArea').style.display = 'none';
-                document.getElementById('attendanceDataArea').style.display = 'block';
+                if (!deferUiReveal) {{
+                    // Show private data area with loading (unless silent refresh)
+                    document.getElementById('privateLoginArea').style.display = 'none';
+                    document.getElementById('privateDataArea').style.display = 'block';
+                    
+                    // Restore last private section (attendance, result-alerts, or official-results)
+                    const lastPrivateSection = localStorage.getItem('lastPrivateSection');
+                    if (lastPrivateSection && !silentRefresh) {{
+                        // Delay slightly to ensure DOM is ready
+                        setTimeout(() => {{
+                            if (lastPrivateSection === 'result-alerts') {{
+                                switchPrivateSection('result-alerts');
+                            }} else if (lastPrivateSection === 'official-results') {{
+                                switchPrivateSection('official-results');
+                            }}
+                            // If 'attendance' or invalid, default to attendance (already active)
+                        }}, 100);
+                    }}
+                }}
                 
                 if (!silentRefresh) {{
                     document.getElementById('attendanceContent').innerHTML = `
@@ -5587,12 +7264,21 @@ async def dashboard() -> HTMLResponse:
                     `;
                 }}
                 
-                try {{
-                    // Fetch attendance data first
-                    const attendanceResponse = await fetch(`/api/attendance/data?session_token=${{encodeURIComponent(attendanceSessionToken)}}`);
-                    const attendanceResult = await attendanceResponse.json();
+                const requestToken = attendanceSessionToken;
+                const requestOwnerKey = getPrivateOwnerKey();
+
+                inFlightAttendance = (async () => {{
+                    try {{
+                        // Fetch attendance data first
+                        const attendanceResponse = await fetch(`/api/attendance/data?session_token=${{encodeURIComponent(requestToken)}}`);
+                        const attendanceResult = await attendanceResponse.json();
                     
-                    if (attendanceResult.success) {{
+                        // If user logged out / switched user while request was in-flight, ignore results
+                        if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
+                            return;
+                        }}
+
+                        if (attendanceResult.success) {{
                         // Refresh session timestamp on successful data load
                         updateSessionTimestamp();
                         
@@ -5626,8 +7312,13 @@ async def dashboard() -> HTMLResponse:
                             }}
                         }}
                         
-                        // Parse HTML and create beautiful cards
-                        await renderAttendanceCards(attendanceResult.html, fullName);
+                            // Cache for instant future loads in this session
+                            cachedAttendanceData = {{ html: attendanceResult.html, fullName: fullName }};
+                            cachedAttendanceAt = Date.now();
+                            persistPrivateCache('attendance', cachedAttendanceData);
+
+                            // Parse HTML and create beautiful cards
+                            await renderAttendanceCards(attendanceResult.html, fullName);
                     }} else {{
                         // Session expired or error
                         if (attendanceResult.error && attendanceResult.error.toLowerCase().includes('expired')) {{
@@ -5642,21 +7333,33 @@ async def dashboard() -> HTMLResponse:
                                 </div>
                             `;
                         }}
-                    }}
-                }} catch (error) {{
-                    document.getElementById('attendanceContent').innerHTML = `
+                        }}
+                    }} catch (error) {{
+                        // If user logged out / switched user while request was in-flight, ignore UI updates
+                        if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
+                            return;
+                        }}
+                        document.getElementById('attendanceContent').innerHTML = `
                         <div class="empty-state">
                             <i class="fas fa-exclamation-triangle"></i>
                             <h3>Error Loading Attendance</h3>
                             <p>${{error.message}}</p>
                         </div>
                     `;
-                }}
+                    }}
+                }})().finally(() => {{
+                    inFlightAttendance = null;
+                }});
+
+                return inFlightAttendance;
             }}
             
             async function logoutAttendance() {{
                 // Stop auto-refresh
                 stopAttendanceAutoRefresh();
+
+                // Purge persisted private caches for this student (must happen before we clear identity)
+                purgePersistedPrivateCaches(getPrivateOwnerKey());
                 
                 if (attendanceSessionToken) {{
                     try {{
@@ -5676,6 +7379,9 @@ async def dashboard() -> HTMLResponse:
                 safeStorage.removeItem('attendance_credentials');
                 safeStorage.removeItem('attendance_session_timestamp');
                 
+                // Clear all cached private data
+                clearPrivateCaches();
+                
                 // Reset form
                 document.getElementById('attendanceLoginForm').reset();
                 document.getElementById('loginSubmitBtn').disabled = false;
@@ -5684,8 +7390,678 @@ async def dashboard() -> HTMLResponse:
                 document.getElementById('loginSubmitBtn').innerHTML = '<i class="fas fa-sign-in-alt"></i><span>Login Securely</span>';
                 
                 // Show login area
-                document.getElementById('attendanceLoginArea').style.display = 'block';
-                document.getElementById('attendanceDataArea').style.display = 'none';
+                document.getElementById('privateLoginArea').style.display = 'block';
+                document.getElementById('privateDataArea').style.display = 'none';
+                
+                // Switch back to lectures zone
+                switchZone('lectures');
+            }}
+            
+            // ===================================
+            // RESULT ALERTS FUNCTIONS (Notification-based)
+            // ===================================
+            
+            async function fetchResultAlerts(silentRefresh = false) {{
+                if (!attendanceSessionToken) {{
+                    return;
+                }}
+
+                ensurePrivateCacheOwner();
+
+                // Deduplicate concurrent loads
+                if (inFlightResultAlerts) {{
+                    if (!silentRefresh && !cachedResultAlerts) {{
+                        document.getElementById('resultsContent').innerHTML = `
+                            <div class="loading">
+                                <div class="spinner"></div>
+                                <p style="color: var(--text-secondary)">Loading result alerts from notifications...</p>
+                            </div>
+                        `;
+                    }}
+                    return inFlightResultAlerts;
+                }}
+                
+                if (!silentRefresh) {{
+                    document.getElementById('resultsContent').innerHTML = `
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p style="color: var(--text-secondary)">Loading result alerts from notifications...</p>
+                        </div>
+                    `;
+                }}
+                
+                const requestToken = attendanceSessionToken;
+                const requestOwnerKey = getPrivateOwnerKey();
+
+                inFlightResultAlerts = (async () => {{
+                    try {{
+                        const response = await fetch(`/api/results/data?session_token=${{encodeURIComponent(requestToken)}}`);
+                        const result = await response.json();
+                    
+                        // If user logged out / switched user while request was in-flight, ignore results
+                        if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
+                            return;
+                        }}
+
+                        if (result.success) {{
+                        // Refresh session timestamp on successful data load
+                        updateSessionTimestamp();
+                        
+                        // Cache the data for instant future loads
+                        cachedResultAlerts = {{
+                            results: result.results || [],
+                            totalCount: result.total_count || 0
+                        }};
+                        cachedResultAlertsAt = Date.now();
+                        persistPrivateCache('result_alerts', cachedResultAlerts);
+                        
+                        // Render results cards
+                        renderResultsCards(cachedResultAlerts.results, cachedResultAlerts.totalCount);
+                    }} else {{
+                        // Session expired or error
+                        if (result.error && result.error.toLowerCase().includes('expired')) {{
+                            logoutAttendance();
+                            alert('Session expired. Please login again.');
+                        }} else {{
+                            document.getElementById('resultsContent').innerHTML = `
+                                <div class="empty-state">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    <h3>Error Loading Result Alerts</h3>
+                                    <p>${{result.error}}</p>
+                                </div>
+                            `;
+                        }}
+                        }}
+                    }} catch (error) {{
+                        // If user logged out / switched user while request was in-flight, ignore UI updates
+                        if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
+                            return;
+                        }}
+                        document.getElementById('resultsContent').innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Error Loading Results</h3>
+                            <p>${{error.message}}</p>
+                        </div>
+                    `;
+                    }}
+                }})().finally(() => {{
+                    inFlightResultAlerts = null;
+                }});
+
+                return inFlightResultAlerts;
+            }}
+            
+            function renderResultsCards(results, totalCount) {{
+                const container = document.getElementById('resultsContent');
+                
+                if (results.length === 0) {{
+                    container.innerHTML = `
+                        <div class="no-absences">
+                            <i class="fas fa-bell-slash"></i>
+                            <h3>No Results Found</h3>
+                            <p>No result-related notifications found in your feed yet.</p>
+                            <div class="login-note" style="margin-top: 1rem;">
+                                <i class="fas fa-info-circle"></i>
+                                <span>Results appear here when published by the college as notifications</span>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }}
+                
+                // Build stats (kept for potential future use, but no
+                // longer rendered as a separate summary row in the
+                // Result Alerts section to keep the UI consistent with
+                // the main Results view.
+                const passedCount = results.filter(r => r.status === 'passed').length;
+                const failedCount = results.filter(r => r.status === 'failed').length;
+                const unknownCount = results.length - passedCount - failedCount;
+
+                // Start without a top summary row so that Result Alerts
+                // focuses on the per-semester breakdown only.
+                let htmlContent = '';
+                
+                // Function to map semester codes to readable semester numbers (1-4)
+                function getSemesterName(semesterCode) {{
+                    if (!semesterCode || semesterCode.trim() === '') {{
+                        return null;
+                    }}
+                    
+                    // Parse patterns like "Software_F25-26", "Software_S25-26", "Software_S_25-26", etc.
+                    const match = semesterCode.match(/([A-Za-z]+)_?([FS])_?(\\d{{2}})-(\\d{{2}})/);
+                    if (match) {{
+                        const [, group, season, startYear, endYear] = match;
+                        const fullStartYear = 2000 + parseInt(startYear);
+                        
+                        // Map academic years to semester numbers
+                        // 24-25: Fall=Semester 1, Spring=Semester 2
+                        // 25-26: Fall=Semester 3, Spring=Semester 4
+                        let semesterNum;
+                        if (fullStartYear === 2024) {{
+                            semesterNum = season === 'F' ? 1 : 2;
+                        }} else if (fullStartYear === 2025) {{
+                            semesterNum = season === 'F' ? 3 : 4;
+                        }} else {{
+                            // For other years, calculate based on offset from 2024
+                            const yearOffset = fullStartYear - 2024;
+                            semesterNum = (yearOffset * 2) + (season === 'F' ? 1 : 2);
+                        }}
+                        
+                        return `Semester ${{semesterNum}}`;
+                    }}
+                    
+                    // Try to extract semester number from patterns like "24_sf_1st_b", "Group A"
+                    const semesterNumMatch = semesterCode.match(/(\d+)/);
+                    if (semesterNumMatch) {{
+                        const num = Math.max(1, parseInt(semesterNumMatch[1]));
+                        return `Semester ${{num}}`;
+                    }}
+                    
+                    // For unrecognized patterns, return null to filter out
+                    return null;
+                }}
+                
+                // Group results by DISPLAY semester name (Semester 1, 2, 3, 4)
+                // This ensures all results with same semester number are grouped together
+                const resultsBySemester = {{}};
+                results.forEach(result => {{
+                    const rawSemester = result.semester;
+                    const displaySemester = getSemesterName(rawSemester);
+                    
+                    // Skip results without valid semester
+                    if (!displaySemester) {{
+                        return;
+                    }}
+                    
+                    // Filter out "skill" subjects from Semester 4 (they belong to Semester 1)
+                    const subjectLower = (result.subject || '').toLowerCase();
+                    if (displaySemester === 'Semester 4' && subjectLower.includes('skill')) {{
+                        return; // Skip this result
+                    }}
+                    
+                    // Show all semesters except Semester 1 and Semester 2
+                    const semNumMatch = displaySemester.match(/(\d+)/);
+                    const semNum = semNumMatch ? parseInt(semNumMatch[1]) : null;
+                    if (semNum && semNum <= 2) {{
+                        return; // Skip semesters 1 and 2
+                    }}
+                    
+                    if (!resultsBySemester[displaySemester]) {{
+                        resultsBySemester[displaySemester] = [];
+                    }}
+                    resultsBySemester[displaySemester].push(result);
+                }});
+                
+                // Check if no valid results after filtering
+                if (Object.keys(resultsBySemester).length === 0) {{
+                    container.innerHTML += `
+                        <div class="no-absences" style="margin-top: 2rem;">
+                            <i class="fas fa-info-circle"></i>
+                            <h3>No Results Available</h3>
+                            <p>Results will appear here once semester information is available.</p>
+                        </div>
+                    `;
+                    return;
+                }}
+                
+                // Sort semesters by semester number (1, 2, 3, 4)
+                const sortedSemesters = Object.keys(resultsBySemester).sort((a, b) => {{
+                    // Extract semester numbers from "Semester 1", "Semester 2", etc.
+                    const numA = parseInt(a.match(/\\d+/)[0]);
+                    const numB = parseInt(b.match(/\\d+/)[0]);
+                    return numA - numB; // Sort ascending (Semester 1, 2, 3, 4)
+                }});
+                
+                // Render each semester section
+                sortedSemesters.forEach((semesterDisplayName, semesterIdx) => {{
+                    const semesterResults = resultsBySemester[semesterDisplayName];
+                    
+                    htmlContent += `
+                        <div class="subject-section" style="margin-bottom: 1.5rem;">
+                            <div class="subject-header" onclick="toggleResultsSemester(this)" style="background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%); cursor: pointer;">
+                                <div class="subject-title" style="color: white; font-size: 1.1rem; font-weight: 700;">
+                                    <i class="fas fa-graduation-cap" style="color: white;"></i>
+                                    ${{semesterDisplayName}}
+                                    <span class="file-count" style="background: rgba(255,255,255,0.2); color: white;">${{semesterResults.length}} result${{semesterResults.length > 1 ? 's' : ''}}</span>
+                                </div>
+                                <div class="collapse-btn">
+                                    <i class="fas fa-chevron-down" style="color: white; transform: rotate(-90deg); transition: transform 0.3s ease;"></i>
+                                </div>
+                            </div>
+                            <div class="semester-results-content" style="display: none; padding: 0; transition: all 0.3s ease;">
+                                <div class="results-table-container">
+                                    <table class="results-table">
+                                        <thead>
+                                            <tr>
+                                                <th>No.</th>
+                                                <th><i class="fas fa-book"></i> Subject</th>
+                                                <th><i class="fas fa-clipboard-list"></i> Exam Type</th>
+                                                <th><i class="fas fa-star"></i> Score</th>
+                                                <th><i class="fas fa-calendar-alt"></i> Date</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                    `;
+                    
+                    // Build table rows for this semester (newest first - already sorted from backend)
+                    // Reset numbering for each semester
+                    let rowIndex = 1;
+                    semesterResults.forEach((result) => {{
+                        // Format date
+                        let formattedDate = 'N/A';
+                        if (result.date) {{
+                            try {{
+                                const dateObj = new Date(result.date);
+                                if (!isNaN(dateObj.getTime())) {{
+                                    formattedDate = dateObj.toLocaleDateString('en-US', {{
+                                        year: 'numeric',
+                                        month: 'short',
+                                        day: 'numeric'
+                                    }});
+                                }}
+                            }} catch (e) {{
+                                formattedDate = result.date;
+                            }}
+                        }}
+                        
+                        htmlContent += `
+                            <tr class="result-row">
+                                <td class="row-number">${{rowIndex}}</td>
+                                <td class="subject-cell">
+                                    <strong>${{result.subject || '-'}}</strong>
+                                </td>
+                                <td>${{result.exam_type || '-'}}</td>
+                                <td class="score-cell">
+                                    <span class="score-badge">${{result.score || '-'}}</span>
+                                </td>
+                                <td style="color: var(--text-tertiary); font-size: 0.9rem;">${{formattedDate}}</td>
+                            </tr>
+                        `;
+                        rowIndex++;
+                    }});
+                    
+                    htmlContent += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }});
+                
+                container.innerHTML = htmlContent;
+            }}
+            
+            // Unified toggle function for all collapsible sections (Result Alerts)
+            function toggleResultsSemester(header) {{
+                const section = header.closest('.subject-section');
+                const icon = header.querySelector('.collapse-btn i');
+                
+                // Smart detection: try multiple content selectors
+                let content = section.querySelector('.semester-results-content');
+                if (!content) {{
+                    content = section.querySelector('.semester-results-table');
+                }}
+                if (!content) {{
+                    content = section.querySelector('.subject-files');
+                }}
+                
+                if (!content) return; // Safety check
+                
+                // Toggle with smooth animation
+                if (content.style.display === 'none' || content.style.display === '') {{
+                    content.style.display = 'block';
+                    setTimeout(() => {{
+                        icon.style.transform = 'rotate(0deg)';
+                    }}, 10);
+                }} else {{
+                    icon.style.transform = 'rotate(-90deg)';
+                    setTimeout(() => {{
+                        content.style.display = 'none';
+                    }}, 150); // Wait for rotation animation
+                }}
+            }}
+            
+            // ===================================
+            // OFFICIAL RESULTS FUNCTIONS (StudentResult API)
+            // ===================================
+            
+            async function fetchOfficialResults(silentRefresh = false) {{
+                if (!attendanceSessionToken) {{
+                    return;
+                }}
+
+                ensurePrivateCacheOwner();
+
+                // Deduplicate concurrent loads
+                if (inFlightOfficialResults) {{
+                    if (!silentRefresh && !cachedOfficialResults) {{
+                        document.getElementById('officialResultsContent').innerHTML = `
+                            <div class="loading">
+                                <div class="spinner"></div>
+                                <p style="color: var(--text-secondary)">Loading official results...</p>
+                            </div>
+                        `;
+                    }}
+                    return inFlightOfficialResults;
+                }}
+                
+                if (!silentRefresh) {{
+                    document.getElementById('officialResultsContent').innerHTML = `
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p style="color: var(--text-secondary)">Loading official results...</p>
+                        </div>
+                    `;
+                }}
+                
+                const requestToken = attendanceSessionToken;
+                const requestOwnerKey = getPrivateOwnerKey();
+
+                inFlightOfficialResults = (async () => {{
+                    try {{
+                        const response = await fetch(`/api/official-results/data?session_token=${{encodeURIComponent(requestToken)}}`);
+                        const result = await response.json();
+                    
+                        // If user logged out / switched user while request was in-flight, ignore results
+                        if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
+                            return;
+                        }}
+
+                        if (result.success) {{
+                        // Refresh session timestamp on successful data load
+                        updateSessionTimestamp();
+                        
+                        // Cache the data for instant future loads
+                        cachedOfficialResults = result.results || [];
+                        cachedOfficialResultsAt = Date.now();
+                        persistPrivateCache('official_results', cachedOfficialResults);
+                        
+                        // Render official results
+                        renderOfficialResults(cachedOfficialResults);
+                    }} else {{
+                        // Session expired or error
+                        if (result.error && result.error.toLowerCase().includes('expired')) {{
+                            logoutAttendance();
+                            alert('Session expired. Please login again.');
+                        }} else {{
+                            // Keep showing last cached results if we have any,
+                            // and only replace the UI with an error screen when
+                            // there is no cached data yet (first load).
+                            console.warn('Error loading official results:', result.error);
+                            if (!cachedOfficialResults || cachedOfficialResults.length === 0) {{
+                                document.getElementById('officialResultsContent').innerHTML = `
+                                    <div class="empty-state">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                        <h3>Error Loading Results</h3>
+                                        <p>${{result.error}}</p>
+                                    </div>
+                                `;
+                            }}
+                        }}
+                        }}
+                    }} catch (error) {{
+                        // If user logged out / switched user while request was in-flight, ignore UI updates
+                        if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
+                            return;
+                        }}
+                        console.error('Network error while loading official results:', error);
+                        // Same rule: only show error screen if we have no cached
+                        // results yet; otherwise keep the last good data visible.
+                        if (!cachedOfficialResults || cachedOfficialResults.length === 0) {{
+                            document.getElementById('officialResultsContent').innerHTML = `
+                                <div class="empty-state">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    <h3>Error Loading Results</h3>
+                                    <p>${{error.message}}</p>
+                                </div>
+                            `;
+                        }}
+                    }}
+                }})().finally(() => {{
+                    inFlightOfficialResults = null;
+                }});
+
+                return inFlightOfficialResults;
+            }}
+            
+            function renderOfficialResults(results) {{
+                const container = document.getElementById('officialResultsContent');
+                
+                if (!results || results.length === 0) {{
+                    container.innerHTML = `
+                        <div class="no-absences">
+                            <i class="fas fa-clipboard-list"></i>
+                            <h3>No Official Results Found</h3>
+                            <p>Your official exam results will appear here once published by the college.</p>
+                            <div class="login-note" style="margin-top: 1rem;">
+                                <i class="fas fa-info-circle"></i>
+                                <span>This section shows official results from the student portal system</span>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }}
+                
+                // Group results by Semester only (like lectures section)
+                let htmlContent = '';
+                const resultsBySemester = {{}};
+                // Keep ONLY final subject rows (defensive UI filter)
+                const finalStatusTokens = [
+                    'accept', 'excellent', 'verygood', 'very good', 'good', 'medium', 'weak',
+                    'pass', 'fail', 'pending', 'not marked', 'not marked yet',
+                    'ناجح', 'راسب', 'مقبول', 'جيد', 'جيد جدا', 'ممتاز', 'قيد الانتظار', 'غير مصحح'
+                ];
+                function _escapeRegex(text) {{
+                    const re = new RegExp('[.*+?^$()|\\[\\]\\\\]', 'g');
+                    return String(text).replace(re, '\\$&');
+                }}
+
+                const gradeTokenRe = new RegExp(finalStatusTokens.map(t => _escapeRegex(t)).join('|'), 'i');
+
+                function _extractYear(label) {{
+                    const m = String(label || '').match(/([0-9]{{4}}) *[-–] *([0-9]{{4}})/);
+                    return m ? `${{m[1]}}-${{m[2]}}` : '';
+                }}
+
+                function _extractSemester(label) {{
+                    const t = String(label || '').toLowerCase();
+                    if (t.includes('fall')) return 'Fall Semester';
+                    if (t.includes('spring')) return 'Spring Semester';
+                    if (t.includes('summer')) return 'Summer Semester';
+                    if (t.includes('1st semester') || t.includes('first semester') || String(label || '').includes('الفصل الأول') || String(label || '').includes('الفصل الاول')) return 'First Semester';
+                    if (t.includes('2nd semester') || t.includes('second semester') || String(label || '').includes('الفصل الثاني')) return 'Second Semester';
+                    return '';
+                }}
+
+                const filteredResults = (results || []).filter((r) => {{
+                    const title = String(r.Title || r.title || r.SubjectName || r.subjectName || r.CourseTitle || r.courseTitle || r.Subject || r.subject || '').trim();
+                    const status = String(r.Status || r.status || '').trim();
+                    const total = String(r.TotalGrade || r.totalGrade || r.ContinuousSummary || r.continuousSummary || r.Points || r.points || '').trim();
+
+                    if (!title) return false;
+                    const titleLower = title.toLowerCase();
+                    const statusLower = status.toLowerCase();
+
+                    // Drop obvious non-subject lines
+                    if (['total', 'sum', 'subtotal', 'overall', 'result'].includes(titleLower)) return false;
+                    if (['total', 'sum', 'subtotal', 'overall', 'result', 'المجموع', 'مجموع', 'الكلي', 'كۆی', 'کۆی گشتی', 'جمع'].some(tok => titleLower.includes(tok))) return false;
+                    // Drop if title itself is just a grade label (e.g., "Medium")
+                    if (gradeTokenRe.test(title) && title.length <= 15) return false;
+
+                    const assessmentLike = ['quiz', 'mid term', 'midterm', 'activity', 'act.', 'ass.', 'assignment', 'report', 'seminar', 'practical', 'presentation', 'final', 'hw', 'homework', 'home work', 'project', 'lab']
+                        .some((tok) => titleLower.includes(tok));
+
+                    const statusLooksFinal = status && gradeTokenRe.test(status);
+
+                    if (assessmentLike && !statusLooksFinal) return false;
+                    if (!statusLooksFinal && (!total || total === '-' || total === '0' || total === '0.0')) return false;
+                    if (['mid term', 'midterm', 'act', 'ass', 'quiz', 'hw', 'homework', 'assignment', 'report', 'presentation', 'project', 'lab'].some(tok => statusLower.includes(tok))) return false;
+
+                    return true;
+                }});
+                
+                filteredResults.forEach((result) => {{
+                    const academicYear = result.AcademicYear || result.academicYear || result.Year || result.year || '';
+                    const semesterName = result.SemesterName || result.Semester || result.semester || 'Unknown Semester';
+                    const semesterLabel = result.SemesterLabel || result.semesterLabel || '';
+
+                    const yearFromLabel = _extractYear(semesterLabel);
+                    const semFromLabel = _extractSemester(semesterLabel);
+                    const year = academicYear || yearFromLabel;
+                    // Prefer label-derived semester when available; upstream semesterName can be inconsistent.
+                    const sem = semFromLabel || ((semesterName && semesterName !== 'Unknown Semester') ? semesterName : semesterName);
+
+                    // STRICT: show ONLY "YYYY-YYYY <Semester>" sections.
+                    // Never show year-only or "Result of..." groups.
+                    if (!year) return;
+                    if (!sem || sem === 'Unknown Semester') return;
+                    const semesterKey = `${{year}} ${{sem}}`;
+                    
+                    if (!resultsBySemester[semesterKey]) {{
+                        resultsBySemester[semesterKey] = [];
+                    }}
+                    
+                    resultsBySemester[semesterKey].push(result);
+                }});
+                
+                // Sort semesters
+                const _order = ['Summer Semester', 'Spring Semester', 'Fall Semester', 'Second Semester', 'First Semester'];
+                const sortedSemesters = Object.keys(resultsBySemester)
+                    .sort((a, b) => {{
+                        const ay = _extractYear(a) || '';
+                        const by = _extractYear(b) || '';
+                        if (ay && by && ay !== by) return by.localeCompare(ay);
+
+                        const as = _extractSemester(a) || '';
+                        const bs = _extractSemester(b) || '';
+                        const ai = _order.indexOf(as);
+                        const bi = _order.indexOf(bs);
+                        if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+
+                        return a.localeCompare(b);
+                    }});
+                
+                // Render each Semester (like lectures section)
+                sortedSemesters.forEach((semesterKey) => {{
+                    const semesterResults = resultsBySemester[semesterKey];
+                    
+                    htmlContent += `
+                        <div class="subject-section" style="margin-bottom: 1.5rem;">
+                            <div class="subject-header" onclick="toggleResultsSemester(this)" style="background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%); cursor: pointer;">
+                                <div class="subject-title" style="color: white; font-weight: 700;">
+                                    <i class="fas fa-calendar-alt" style="color: white;"></i>
+                                    ${{semesterKey}}
+                                    <span class="file-count" style="background: rgba(255,255,255,0.2); color: white;">${{semesterResults.length}} Subject${{semesterResults.length > 1 ? 's' : ''}}</span>
+                                </div>
+                                <div class="collapse-btn">
+                                    <i class="fas fa-chevron-down" style="color: white; transform: rotate(-90deg); transition: transform 0.3s ease;"></i>
+                                </div>
+                            </div>
+                            <div class="semester-results-table" style="display: none; padding: 0; overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse; background: var(--bg-secondary);">
+                                    <thead>
+                                        <tr style="background: var(--surface); border-bottom: 2px solid var(--border);">
+                                            <th style="padding: 1rem; text-align: left; color: var(--text-primary); font-weight: 700; font-size: 0.85rem; text-transform: uppercase;">
+                                                <i class="fas fa-book" style="margin-right: 0.5rem; color: var(--accent);"></i>Title
+                                            </th>
+                                            <th style="padding: 1rem; text-align: center; color: var(--text-primary); font-weight: 700; font-size: 0.85rem; text-transform: uppercase; width: 200px;">
+                                                Total Grade
+                                            </th>
+                                            <th style="padding: 1rem; text-align: center; color: var(--text-primary); font-weight: 700; font-size: 0.85rem; text-transform: uppercase; width: 180px;">
+                                                <i class="fas fa-check-circle" style="margin-right: 0.5rem; color: var(--accent);"></i>Status
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                    `;
+                    
+                    // Render each result row
+                    semesterResults.forEach((result, index) => {{
+                        // Simplified mapping: ONLY Title, Total Grade, Status
+                        const title = result.Title || result.title || result.SubjectName || result.subjectName || result.CourseTitle || result.courseTitle || result.Subject || result.subject || 'Unknown Subject';
+                        let totalGrade = result.TotalGrade || result.totalGrade || result.ContinuousSummary || result.continuousSummary || result.ContinuousTotal || result.continuousTotal || result.Points || result.points || '-';
+                        totalGrade = (totalGrade != null && String(totalGrade).trim() !== '') ? String(totalGrade).trim() : '-';
+
+                        let rawStatus = result.Status || result.status || '';
+                        rawStatus = (rawStatus != null && String(rawStatus).trim() !== '') ? String(rawStatus).trim() : '';
+
+                        const statusLower = rawStatus.toLowerCase();
+                        
+                        // Determine final status (Pass/Fail) based on status text
+                        let statusColor = '#94a3b8';
+                        let statusIcon = 'fa-clock';
+                        let statusBg = 'rgba(148, 163, 184, 0.15)';
+                        // IMPORTANT: display the real system status text when present
+                        let statusDisplay = rawStatus || '-';
+
+                        // Check for explicit status text first (match college system)
+                        if (
+                            statusLower.includes('pass') ||
+                            statusLower.includes('accept') ||
+                            statusLower.includes('excellent') ||
+                            statusLower.includes('verygood') ||
+                            statusLower.includes('very good') ||
+                            statusLower.includes('good') ||
+                            statusLower.includes('medium') ||
+                            statusLower === 'ناجح'
+                        ) {{
+                            statusColor = '#10b981';
+                            statusIcon = 'fa-check-circle';
+                            statusBg = 'rgba(16, 185, 129, 0.15)';
+                            // Keep system-provided label if present; otherwise fallback
+                            statusDisplay = rawStatus || 'Pass';
+                        }} else if (statusLower.includes('pending') || statusLower.includes('not marked') || statusLower === 'قيد الانتظار' || statusLower === 'لە چاوەڕوانیدا') {{
+                            statusColor = '#94a3b8';
+                            statusIcon = 'fa-clock';
+                            statusBg = 'rgba(148, 163, 184, 0.15)';
+                            statusDisplay = rawStatus || '-';
+                        }} else if (statusLower.includes('fail') || statusLower === 'راسب') {{
+                            statusColor = '#ef4444';
+                            statusIcon = 'fa-times-circle';
+                            statusBg = 'rgba(239, 68, 68, 0.15)';
+                            statusDisplay = rawStatus || 'Fail';
+                        }} else {{
+                            // No guessing: keep rawStatus if present, else leave '-'
+                            statusDisplay = statusDisplay;
+                        }}
+                        
+                        htmlContent += `
+                            <tr style="border-bottom: 1px solid var(--border); transition: background 0.2s;" onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background='transparent'">
+                                <td style="padding: 1rem;">
+                                    <div style="font-weight: 600; color: var(--text-primary); font-size: 0.95rem; line-height: 1.4;">${{title}}</div>
+                                </td>
+                                <td style="padding: 1rem; text-align: center;">
+                                    <span style="display: inline-block; padding: 0.5rem 1rem; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 10px; font-weight: 700; font-size: 0.95rem; min-width: 80px;">${{totalGrade}}</span>
+                                </td>
+                                <td style="padding: 1rem; text-align: center;">
+                                    <span style="display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1rem; background: ${{statusBg}}; color: ${{statusColor}}; border-radius: 10px; font-weight: 600; font-size: 0.85rem;">
+                                        <i class="fas ${{statusIcon}}"></i>${{statusDisplay}}
+                                    </span>
+                                </td>
+                            </tr>
+                        `;
+                    }});
+                    
+                    htmlContent += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    `;
+                }});
+                
+                container.innerHTML = htmlContent;
+            }}
+            
+            // Legacy support for old function names
+            function toggleSemesterSection(header) {{
+                toggleResultsSemester(header);
+            }}
+            
+            function toggleOfficialSemesterSection(header) {{
+                toggleResultsSemester(header);
             }}
         </script>
         
@@ -5880,7 +8256,7 @@ async def dashboard() -> HTMLResponse:
             // OFFLINE-FIRST: Network status monitoring (console only, no UI changes)
             // Why: Helps debug offline issues without disrupting user experience
             function updateOnlineStatus() {{
-                const condition = navigator.onLine ? '🟢 ONLINE' : '🔴 OFFLINE';
+                const condition = navigator.onLine ? 'ONLINE' : 'OFFLINE';
                 console.log(`[Network Status] ${{condition}} - App continues working with cached data`);
                 
                 // Store status for API calls to handle gracefully

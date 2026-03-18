@@ -54,48 +54,61 @@ def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
 def format_lecture_notification(
     lecture_title: str,
     course_name: Optional[str] = None,
-    instructor_name: Optional[str] = None,
+    lecture_number: Optional[int] = None,
     upload_date: Optional[str] = None,
     lecture_link: Optional[str] = None
 ) -> str:
     """
-    Format a lecture notification message with nice design
+    Format a lecture notification message with Kurdish design
     
     Args:
         lecture_title: The title/name of the lecture file
         course_name: The name of the course/subject
-        instructor_name: Name of the instructor (optional)
+        lecture_number: Lecture number (optional)
         upload_date: Date of upload
         lecture_link: Optional link to access the lecture
     
     Returns:
-        Formatted message string with Markdown formatting
+        Formatted message string with Kurdish text
     """
     # Format the date nicely (Iraq timezone: Asia/Baghdad UTC+3)
-    if not upload_date:
-        iraq_tz = pytz.timezone('Asia/Baghdad')
-        upload_date = datetime.now(iraq_tz).strftime("%B %d, %Y at %I:%M %p")
+    iraq_tz = pytz.timezone('Asia/Baghdad')
+    current_time = datetime.now(iraq_tz)
     
-    # Build the message with emojis and formatting
+    # Format date (dd/mm/yyyy) and time (12-hour format with AM/PM)
+    date_formatted = current_time.strftime("%d/%m/%Y")
+    time_formatted = current_time.strftime("%I:%M %p")
+    
+    # Build the clean, professional message
     message_parts = [
-        "📚 *New Lecture Uploaded!*",
+        "📢 ئاگاداری نوێ",
         "",
+        "لێکچەری نوێ بۆ ئەم بابەتە زیادکرا:",
     ]
     
+    # Add subject name with emoji
     if course_name:
-        message_parts.append(f"🎓 *Course:* {course_name}")
+        message_parts.append(f"📘 {course_name}")
+    else:
+        message_parts.append(f"📘 {lecture_title}")
     
-    message_parts.append(f"📖 *Lecture:* {lecture_title}")
-    
-    if instructor_name:
-        message_parts.append(f"👨‍🏫 *Instructor:* {instructor_name}")
-    
-    message_parts.append(f"📅 *Date:* {upload_date}")
     message_parts.append("")
-    message_parts.append("🚀 Stay focused and happy learning!")
     
+    # Add lecture number if available
+    if lecture_number:
+        message_parts.append(f"🔹 لێکچەر: {lecture_number}")
+    
+    # Add date and time on separate lines
+    message_parts.append(f"📅 {date_formatted}")
+    message_parts.append(f"🕒 {time_formatted}")
+    
+    message_parts.append("")
+    message_parts.append("✅ لە سیستەمەکەدا ئامادەیە")
+    
+    # Add link at the end
     if lecture_link:
-        message_parts.append(f"🔗 [Watch here]({lecture_link})")
+        message_parts.append("🔗 بۆ بینینی لێکچەرەکە:")
+        message_parts.append(lecture_link)
     
     return "\n".join(message_parts)
 
@@ -120,26 +133,40 @@ def notify_new_lecture(
         # Extract filename and create a clean title
         lecture_title = file_path.stem.replace("_", " ").replace("-", " ")
         
-        # Create a lecture link if base_url is provided
-        lecture_link = None
-        if base_url:
-            # Construct the link to the file
-            relative_path = str(file_path).replace("\\", "/")
-            # Extract just the filename for the URL
-            filename = file_path.name
-            lecture_link = f"{base_url}/files/{filename}"
+        # Try to extract lecture number from filename (e.g., "lecture 7", "L7", "7", etc.)
+        import re
+        lecture_number = None
+        
+        # Try different patterns to extract lecture number
+        patterns = [
+            r'lecture[_\-\s]*(\d+)',  # "lecture 7", "lecture_7", "lecture-7"
+            r'l[_\-\s]*(\d+)',        # "l7", "l_7", "l-7", "L7"
+            r'lec[_\-\s]*(\d+)',      # "lec7", "lec_7"
+            r'^(\d+)',                # Starting with number
+            r'[_\-\s](\d+)$',         # Ending with number
+        ]
+        
+        filename_lower = file_path.stem.lower()
+        for pattern in patterns:
+            match = re.search(pattern, filename_lower)
+            if match:
+                lecture_number = int(match.group(1))
+                break
+        
+        # Create system link (main dashboard URL)
+        system_link = base_url if base_url else "https://swiftsync-013r.onrender.com/"
         
         # Format the message
         message = format_lecture_notification(
             lecture_title=lecture_title,
-            course_name=subject or "General Studies",
-            instructor_name=None,  # Can be enhanced later to extract instructor info
+            course_name=subject,
+            lecture_number=lecture_number,
             upload_date=datetime.now(pytz.timezone('Asia/Baghdad')).strftime("%B %d, %Y at %I:%M %p"),
-            lecture_link=lecture_link
+            lecture_link=system_link
         )
         
-        # Send the notification
-        return send_telegram_message(message)
+        # Send the notification (use HTML parse mode for better link rendering)
+        return send_telegram_message(message, parse_mode=None)
         
     except Exception as e:
         logger.exception(f"Error notifying about new lecture: {e}")
@@ -152,7 +179,7 @@ def notify_multiple_lectures(
     upload_date: Optional[str] = None
 ) -> bool:
     """
-    Send a summary notification when multiple lectures are uploaded
+    Send a summary notification when multiple lectures are uploaded (Kurdish version)
     
     Args:
         file_count: Number of new lectures
@@ -163,19 +190,23 @@ def notify_multiple_lectures(
         True if notification was sent successfully
     """
     try:
-        subject_info = f" in *{subject}*" if subject else ""
-        
-        # Use provided upload date or current time (Iraq timezone: Asia/Baghdad UTC+3)
+        # Get Iraq timezone (Asia/Baghdad UTC+3)
         iraq_tz = pytz.timezone('Asia/Baghdad')
-        date_str = upload_date if upload_date else datetime.now(iraq_tz).strftime("%B %d, %Y at %I:%M %p")
+        current_time = datetime.now(iraq_tz)
         
-        message = f"""📚 *Multiple New Lectures Uploaded!*
-
-🎓 *Count:* {file_count} new lectures{subject_info}
-📅 *Date:* {date_str}
-
-🚀 Stay focused and happy learning!
-💪 Keep up the great work!"""
+        # Format date and time in Kurdish numerals
+        date_formatted = current_time.strftime("%d/%m/%Y").replace('0', '٠').replace('1', '١').replace('2', '٢').replace('3', '٣').replace('4', '٤').replace('5', '٥').replace('6', '٦').replace('7', '٧').replace('8', '٨').replace('9', '٩')
+        time_formatted = current_time.strftime("%I:%M").replace('0', '٠').replace('1', '١').replace('2', '٢').replace('3', '٣').replace('4', '٤').replace('5', '٥').replace('6', '٦').replace('7', '٧').replace('8', '٨').replace('9', '٩')
+        count_formatted = str(file_count).replace('0', '٠').replace('1', '١').replace('2', '٢').replace('3', '٣').replace('4', '٤').replace('5', '٥').replace('6', '٦').replace('7', '٧').replace('8', '٨').replace('9', '٩')
+        
+        # Use subject name if provided, otherwise use generic text
+        subject_name = subject if subject else "بابەتی جیاواز"
+        
+        message = f"""📚 لێکچەری نوێ داندراوە!
+📙 بابەت: {subject_name}
+🔄 ژمارە: {count_formatted} لێکچەری نوێ
+📆 بەروار: {date_formatted}
+🕓 کاتژمێر: {time_formatted}"""
         
         return send_telegram_message(message)
         

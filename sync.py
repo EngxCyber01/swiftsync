@@ -335,7 +335,7 @@ def download_material(session: requests.Session, item_id: str) -> Tuple[Path, st
     return target, upload_date
 
 
-def sync_once(auth_client: AuthClient, send_notifications: bool = True) -> Tuple[int, List[Path], List[str]]:
+def sync_once(auth_client: AuthClient, send_notifications: bool = True) -> Tuple[int, List[Path], List[str], dict]:
     """
     Sync lectures once.
     
@@ -344,12 +344,14 @@ def sync_once(auth_client: AuthClient, send_notifications: bool = True) -> Tuple
         send_notifications: Whether to track items for notifications (False for silent sync)
     
     Returns:
-        Tuple of (new_files_count, new_file_paths, new_item_ids_for_notification)
+        Tuple of (new_files_count, new_file_paths, new_item_ids_for_notification, subject_map)
+        subject_map: Dictionary mapping item_id to subject name for notifications
     """
     _init_db()
     session = auth_client.get_authenticated_session()
     new_files: List[Path] = []
     new_item_ids: List[str] = []  # Track IDs for notification
+    subject_map: dict = {}  # Map item_id to subject name
 
     logger.info("Starting sync cycle...")
     
@@ -370,6 +372,7 @@ def sync_once(auth_client: AuthClient, send_notifications: bool = True) -> Tuple
                     # Track for notification only if not already notified
                     if send_notifications and not _was_notified(item_id):
                         new_item_ids.append(item_id)
+                        subject_map[item_id] = subject  # Store subject for this ID
                     logger.info("Successfully downloaded: %s (Upload date: %s)", path.name, upload_date)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception("Failed to download id=%s: %s", item_id, exc)
@@ -380,7 +383,7 @@ def sync_once(auth_client: AuthClient, send_notifications: bool = True) -> Tuple
         
         if not ids:
             logger.warning("No lecture IDs found in timeline response.")
-            return 0, new_files
+            return 0, new_files, [], {}
 
         logger.info("Found %d total IDs in timeline", len(ids))
         
@@ -396,12 +399,13 @@ def sync_once(auth_client: AuthClient, send_notifications: bool = True) -> Tuple
                 # Track for notification only if not already notified
                 if send_notifications and not _was_notified(item_id):
                     new_item_ids.append(item_id)
+                    subject_map[item_id] = "بابەتی جیاواز"  # Generic subject in Kurdish
                 logger.info("Successfully downloaded: %s (Upload date: %s)", path.name, upload_date)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Failed to download id=%s: %s", item_id, exc)
 
     logger.info("Sync cycle completed: %d new files downloaded, %d need notification", len(new_files), len(new_item_ids))
-    return len(new_files), new_files, new_item_ids
+    return len(new_files), new_files, new_item_ids, subject_map
 
 
 def sync_forever(auth_client: AuthClient) -> None:
@@ -409,7 +413,7 @@ def sync_forever(auth_client: AuthClient) -> None:
 
     while True:
         try:
-            count, files, new_ids = sync_once(auth_client)
+            count, files, new_ids, subject_map = sync_once(auth_client)
             logger.info("Sync completed: %d new files downloaded", count)
         except AuthError as exc:
             logger.warning("Authentication failed: %s. Re-authenticating...", exc)
