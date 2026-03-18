@@ -11,8 +11,11 @@ from bs4 import BeautifulSoup
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+import uvicorn
 
 from auth import AuthClient, AuthConfig, AuthError
 from sync import DOWNLOAD_DIR, SYNC_INTERVAL_SECONDS, sync_once, _was_notified, _mark_notified, _get_semester_from_subject
@@ -27,6 +30,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 # Get base URL from environment or detect from request
 BASE_URL = os.getenv("BASE_URL", "https://swiftsync-013r.onrender.com")
+IS_PRODUCTION = os.getenv("ENVIRONMENT", "").lower() == "production"
 _gemini_key = os.getenv("GEMINI_API_KEY")
 _openai_key = os.getenv("OPENAI_API_KEY")
 SECRET_ADMIN_KEY = os.getenv("SECRET_ADMIN_KEY", "emadCyberSoft4SOC")
@@ -87,6 +91,7 @@ async def favicon() -> FileResponse:
     if favicon_path.is_file():
         return FileResponse(favicon_path)
     raise HTTPException(status_code=404, detail="Favicon not found")
+
 
 def get_real_client_ip(request: Request) -> str:
     """
