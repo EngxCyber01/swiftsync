@@ -3345,6 +3345,10 @@ async def dashboard() -> HTMLResponse:
                 transform: scale(0.97) !important;  /* INSTANT visual feedback */
                 transition: transform 0.05s ease-out !important;
             }}
+
+            .tap-active {{
+                transform: scale(0.97) !important;
+            }}
             
             :root {{
                 --bg-primary: #0a0a0a;
@@ -5972,6 +5976,7 @@ async def dashboard() -> HTMLResponse:
             var inFlightAttendance = null;
             var inFlightResultAlerts = null;
             var inFlightOfficialResults = null;
+            var inFlightPrivateBootstrap = null;
 
             // Security hardening: do not keep saved plaintext credentials in storage.
             safeStorage.removeItem('attendance_credentials');
@@ -6084,6 +6089,7 @@ async def dashboard() -> HTMLResponse:
                 inFlightAttendance = null;
                 inFlightResultAlerts = null;
                 inFlightOfficialResults = null;
+                inFlightPrivateBootstrap = null;
             }}
 
             function ensurePrivateCacheOwner() {{
@@ -6171,6 +6177,45 @@ async def dashboard() -> HTMLResponse:
                         fetchOfficialResults(true);
                     }}
                 }}
+            }}
+
+            async function preloadPrivateDataForLogin(options = {{}}) {{
+                if (!attendanceSessionToken) {{
+                    return {{ attendanceReady: false, resultAlertsReady: false, officialResultsReady: false }};
+                }}
+
+                const deferUiReveal = options.deferUiReveal !== false;
+                const forceRefresh = options.forceRefresh === true;
+
+                if (inFlightPrivateBootstrap) {{
+                    return inFlightPrivateBootstrap;
+                }}
+
+                inFlightPrivateBootstrap = (async () => {{
+                    const attendancePromise = loadAttendanceData(false, deferUiReveal);
+                    const resultAlertsPromise = (forceRefresh || !cachedResultAlerts)
+                        ? fetchResultAlerts(true)
+                        : Promise.resolve(true);
+                    const officialResultsPromise = (forceRefresh || !cachedOfficialResults)
+                        ? fetchOfficialResults(true)
+                        : Promise.resolve(true);
+
+                    const [attendanceState, resultAlertsState, officialResultsState] = await Promise.allSettled([
+                        attendancePromise,
+                        resultAlertsPromise,
+                        officialResultsPromise
+                    ]);
+
+                    const attendanceReady = attendanceState.status === 'fulfilled' && attendanceState.value === true;
+                    const resultAlertsReady = resultAlertsState.status === 'fulfilled' && resultAlertsState.value === true;
+                    const officialResultsReady = officialResultsState.status === 'fulfilled' && officialResultsState.value === true;
+
+                    return {{ attendanceReady, resultAlertsReady, officialResultsReady }};
+                }})().finally(() => {{
+                    inFlightPrivateBootstrap = null;
+                }});
+
+                return inFlightPrivateBootstrap;
             }}
             
             // Lectures data variables
@@ -6959,7 +7004,7 @@ async def dashboard() -> HTMLResponse:
             // ATTENDANCE FUNCTIONS
             // ===================================
             
-            function checkAttendanceSession() {{
+            async function checkAttendanceSession() {{
                 // Check if session is expired
                 if (attendanceSessionToken && isSessionExpired()) {{
                     console.log('Session expired, clearing...');
@@ -6997,8 +7042,21 @@ async def dashboard() -> HTMLResponse:
                             privateDataBootstrapped = true;
                         }}
                     }} else {{
-                        loadAttendanceData(false);
-                        preloadPrivateData({{ skipAttendance: true, forceRefresh: false }});
+                        const prefetchState = await preloadPrivateDataForLogin({{ deferUiReveal: true, forceRefresh: false }});
+                        if (attendanceSessionToken && prefetchState.attendanceReady) {{
+                            document.getElementById('privateLoginArea').style.display = 'none';
+                            document.getElementById('privateDataArea').style.display = 'block';
+                            privateDataBootstrapped = true;
+
+                            const lastPrivateSection = safeStorage.getItem('lastPrivateSection');
+                            if (lastPrivateSection === 'result-alerts') {{
+                                switchPrivateSection('result-alerts');
+                            }} else if (lastPrivateSection === 'official-results') {{
+                                switchPrivateSection('official-results');
+                            }} else {{
+                                switchPrivateSection('attendance');
+                            }}
+                        }}
                     }}
 
                     // Keep data fixed during active session (no periodic forced reloads).
@@ -7079,14 +7137,12 @@ async def dashboard() -> HTMLResponse:
                         // Fetch ALL private data during login loading, so tabs are instant after login.
                         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Loading your data...</span>';
 
-                        // Start in parallel (silent to avoid spinners in hidden sections)
-                        const resultAlertsPromise = fetchResultAlerts(true).catch(() => null);
-                        const officialResultsPromise = fetchOfficialResults(true).catch(() => null);
-                        const attendancePromise = loadAttendanceData(false, true);
+                        // Hard gate: start and await all three private endpoints during login.
+                        const prefetchState = await preloadPrivateDataForLogin({{ deferUiReveal: true, forceRefresh: true }});
+                        if (!prefetchState.attendanceReady) {{
+                            throw new Error('Unable to load attendance data. Please try again.');
+                        }}
 
-                        // Attendance is required to enter private mode
-                        await attendancePromise;
-                        await Promise.allSettled([resultAlertsPromise, officialResultsPromise]);
                         privateDataBootstrapped = true;
 
                         // Now reveal private mode UI (everything should be ready)
@@ -7101,6 +7157,10 @@ async def dashboard() -> HTMLResponse:
                             switchPrivateSection('official-results');
                         }} else {{
                             switchPrivateSection('attendance');
+                        }}
+
+                        if (!prefetchState.resultAlertsReady || !prefetchState.officialResultsReady) {{
+                            showNotification('Some private sections are still loading. Open a tab to auto-retry.', 'error');
                         }}
                         
                         // Keep private data fixed during active session.
@@ -7310,7 +7370,7 @@ async def dashboard() -> HTMLResponse:
             
             async function loadAttendanceData(silentRefresh = false, deferUiReveal = false) {{
                 if (!attendanceSessionToken) {{
-                    return;
+                    return false;
                 }}
 
                 ensurePrivateCacheOwner();
@@ -7361,6 +7421,7 @@ async def dashboard() -> HTMLResponse:
                 const requestOwnerKey = getPrivateOwnerKey();
 
                 inFlightAttendance = (async () => {{
+                    let loadedSuccessfully = false;
                     try {{
                         // Fetch attendance data first
                         const attendanceResult = await apiFetchJson(`/api/attendance/data?session_token=${{encodeURIComponent(requestToken)}}`, {{}}, 2, 12000);
@@ -7410,6 +7471,7 @@ async def dashboard() -> HTMLResponse:
 
                             // Parse HTML and create beautiful cards
                             await renderAttendanceCards(attendanceResult.html, fullName);
+                                loadedSuccessfully = true;
                     }} else {{
                         // Session expired or error
                         if (attendanceResult.error && attendanceResult.error.toLowerCase().includes('expired')) {{
@@ -7438,6 +7500,7 @@ async def dashboard() -> HTMLResponse:
                         </div>
                     `;
                     }}
+                    return loadedSuccessfully;
                 }})().finally(() => {{
                     inFlightAttendance = null;
                 }});
@@ -7496,7 +7559,7 @@ async def dashboard() -> HTMLResponse:
             
             async function fetchResultAlerts(silentRefresh = false) {{
                 if (!attendanceSessionToken) {{
-                    return;
+                    return false;
                 }}
 
                 ensurePrivateCacheOwner();
@@ -7527,6 +7590,7 @@ async def dashboard() -> HTMLResponse:
                 const requestOwnerKey = getPrivateOwnerKey();
 
                 inFlightResultAlerts = (async () => {{
+                    let loadedSuccessfully = false;
                     try {{
                         const result = await apiFetchJson(`/api/results/data?session_token=${{encodeURIComponent(requestToken)}}`, {{}}, 2, 12000);
                     
@@ -7549,6 +7613,7 @@ async def dashboard() -> HTMLResponse:
                         
                         // Render results cards
                         renderResultsCards(cachedResultAlerts.results, cachedResultAlerts.totalCount);
+                        loadedSuccessfully = true;
                     }} else {{
                         // Session expired or error
                         if (result.error && result.error.toLowerCase().includes('expired')) {{
@@ -7577,6 +7642,7 @@ async def dashboard() -> HTMLResponse:
                         </div>
                     `;
                     }}
+                    return loadedSuccessfully;
                 }})().finally(() => {{
                     inFlightResultAlerts = null;
                 }});
@@ -7821,7 +7887,7 @@ async def dashboard() -> HTMLResponse:
             
             async function fetchOfficialResults(silentRefresh = false) {{
                 if (!attendanceSessionToken) {{
-                    return;
+                    return false;
                 }}
 
                 ensurePrivateCacheOwner();
@@ -7852,6 +7918,7 @@ async def dashboard() -> HTMLResponse:
                 const requestOwnerKey = getPrivateOwnerKey();
 
                 inFlightOfficialResults = (async () => {{
+                    let loadedSuccessfully = false;
                     try {{
                         const result = await apiFetchJson(`/api/official-results/data?session_token=${{encodeURIComponent(requestToken)}}`, {{}}, 2, 15000);
                     
@@ -7871,6 +7938,7 @@ async def dashboard() -> HTMLResponse:
                         
                         // Render official results
                         renderOfficialResults(cachedOfficialResults);
+                        loadedSuccessfully = true;
                     }} else {{
                         // Session expired or error
                         if (result.error && result.error.toLowerCase().includes('expired')) {{
@@ -7910,6 +7978,7 @@ async def dashboard() -> HTMLResponse:
                             `;
                         }}
                     }}
+                    return loadedSuccessfully;
                 }})().finally(() => {{
                     inFlightOfficialResults = null;
                 }});
@@ -8181,29 +8250,30 @@ async def dashboard() -> HTMLResponse:
                 
                 // Fix iOS tap delay (300ms)
                 document.addEventListener('touchstart', function() {{}}, true);
-                
-                // Enhance all buttons with touch feedback
-                const buttons = document.querySelectorAll('button, .btn, .action-btn, .sync-btn, .admin-btn');
-                buttons.forEach(btn => {{
-                    // Add active state on touch
-                    btn.addEventListener('touchstart', function() {{
-                        this.style.transform = 'scale(0.95)';
-                    }}, {{ passive: true }});
-                    
-                    btn.addEventListener('touchend', function() {{
-                        this.style.transform = '';
-                    }}, {{ passive: true }});
-                    
-                    btn.addEventListener('touchcancel', function() {{
-                        this.style.transform = '';
-                    }}, {{ passive: true }});
-                }});
+
+                // Delegated touch feedback keeps interaction instant for current and future buttons.
+                const quickTapSelector = 'button, .btn, .action-btn, .sync-btn, .admin-btn, .zone-tab, .private-subtab, .subject-header, .open-btn, .download-btn';
+                const getQuickTapTarget = (target) => target && target.closest ? target.closest(quickTapSelector) : null;
+
+                document.addEventListener('touchstart', (event) => {{
+                    const tapTarget = getQuickTapTarget(event.target);
+                    if (tapTarget) tapTarget.classList.add('tap-active');
+                }}, {{ passive: true }});
+
+                const clearTapState = (event) => {{
+                    const tapTarget = getQuickTapTarget(event.target);
+                    if (tapTarget) tapTarget.classList.remove('tap-active');
+                }};
+
+                document.addEventListener('touchend', clearTapState, {{ passive: true }});
+                document.addEventListener('touchcancel', clearTapState, {{ passive: true }});
                 
                 // Prevent double-tap zoom on buttons
                 let lastTouchEnd = 0;
                 document.addEventListener('touchend', function(event) {{
                     const now = Date.now();
-                    if (now - lastTouchEnd <= 300) {{
+                    const target = getQuickTapTarget(event.target);
+                    if (target && now - lastTouchEnd <= 300) {{
                         event.preventDefault();
                     }}
                     lastTouchEnd = now;
