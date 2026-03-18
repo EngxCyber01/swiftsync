@@ -12,6 +12,9 @@ from typing import List, Dict, Optional
 # Database path
 DB_PATH = Path("data") / "lecture_sync.db"
 
+# Ensure data directory exists
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
 
 def init_security_tables():
     """Initialize security tables for visitor logs and IP blacklist"""

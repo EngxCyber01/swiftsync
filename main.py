@@ -80,6 +80,7 @@ app.add_middleware(
 )
 
 # Ensure the lectures_storage directory exists before mounting
+DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/files", StaticFiles(directory=DOWNLOAD_DIR, html=False), name="files")
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
