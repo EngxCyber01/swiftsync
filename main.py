@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import ipaddress
 import logging
 import os
 import sqlite3
@@ -115,25 +116,56 @@ def get_real_client_ip(request: Request) -> str:
     Get the real client IP address from request, handling all proxy headers.
     Checks multiple headers in order of reliability.
     """
-    # Check proxy headers in order of preference
-    # 1. CF-Connecting-IP (Cloudflare)
-    cf_ip = request.headers.get("CF-Connecting-IP")
+    direct_ip = request.client.host if request.client else "unknown"
+
+    # Only trust forwarded headers when explicitly enabled.
+    if not TRUST_PROXY_HEADERS:
+        return direct_ip
+
+    # If a trusted-proxy list is configured, require direct peer match.
+    if TRUSTED_PROXY_IPS and direct_ip not in TRUSTED_PROXY_IPS:
+        return direct_ip
+
+    # Check proxy headers in order of preference with IP validation.
+    cf_ip = _normalize_ip(request.headers.get("CF-Connecting-IP", ""))
     if cf_ip:
-        return cf_ip.strip()
-    
-    # 2. X-Real-IP (Nginx, other proxies)
-    real_ip = request.headers.get("X-Real-IP")
+        return cf_ip
+
+    real_ip = _normalize_ip(request.headers.get("X-Real-IP", ""))
     if real_ip:
-        return real_ip.strip()
-    
-    # 3. X-Forwarded-For (most common, can have multiple IPs)
-    forwarded_for = request.headers.get("X-Forwarded-For")
+        return real_ip
+
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
     if forwarded_for:
-        # Take the first IP (client IP)
-        return forwarded_for.split(",")[0].strip()
-    
-    # 4. Fallback to direct connection IP
-    return request.client.host if request.client else "unknown"
+        for part in forwarded_for.split(","):
+            candidate = _normalize_ip(part)
+            if candidate:
+                return candidate
+
+    return direct_ip
+
+
+def _normalize_ip(value: str) -> str:
+    """Return canonical IP string, or empty if invalid."""
+    candidate = (value or "").strip()
+    if not candidate:
+        return ""
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return ""
+
+
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").strip().lower() in {"1", "true", "yes"}
+_trusted_proxy_env = os.getenv("TRUSTED_PROXY_IPS", "").strip()
+TRUSTED_PROXY_IPS = {
+    normalized
+    for normalized in (
+        _normalize_ip(item)
+        for item in _trusted_proxy_env.split(",")
+    )
+    if normalized
+}
 
 
 RATE_LIMIT_SYNC_PER_MINUTE = int(os.getenv("RATE_LIMIT_SYNC_PER_MINUTE", "6"))
@@ -7782,7 +7814,7 @@ async def dashboard() -> HTMLResponse:
                     }}
                     
                     // Try to extract semester number from patterns like "24_sf_1st_b", "Group A"
-                    const semesterNumMatch = semesterCode.match(/(\d+)/);
+                    const semesterNumMatch = semesterCode.match(/(\\d+)/);
                     if (semesterNumMatch) {{
                         const num = Math.max(1, parseInt(semesterNumMatch[1]));
                         return `Semester ${{num}}`;
@@ -7811,7 +7843,7 @@ async def dashboard() -> HTMLResponse:
                     }}
                     
                     // Show all semesters except Semester 1 and Semester 2
-                    const semNumMatch = displaySemester.match(/(\d+)/);
+                    const semNumMatch = displaySemester.match(/(\\d+)/);
                     const semNum = semNumMatch ? parseInt(semNumMatch[1]) : null;
                     if (semNum && semNum <= 2) {{
                         return; // Skip semesters 1 and 2

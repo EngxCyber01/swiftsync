@@ -76,7 +76,7 @@ def get_cache_key(file_path: Path) -> str:
     """Generate a cache key based on file path and modification time"""
     stat = file_path.stat()
     key_data = f"{file_path.name}:{stat.st_size}:{stat.st_mtime}"
-    return hashlib.md5(key_data.encode()).hexdigest()
+    return hashlib.sha256(key_data.encode()).hexdigest()
 
 
 def get_cached_summary(file_path: Path) -> Optional[Dict]:
@@ -345,7 +345,7 @@ async def summarize_all_lectures(file_paths: List[Path], subject_name: str) -> D
     
     # Generate a cache key based on all files
     cache_data = f"{subject_name}:" + ":".join(sorted([f.name for f in file_paths]))
-    cache_key = hashlib.md5(cache_data.encode()).hexdigest()
+    cache_key = hashlib.sha256(cache_data.encode()).hexdigest()
     cache_file = CACHE_DIR / f"combined_{cache_key}.json"
     
     # Check cache
