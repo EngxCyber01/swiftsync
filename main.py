@@ -11,10 +11,11 @@ from bs4 import BeautifulSoup
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Header, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+                gap: 0.85rem;
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
+                font-size: 1.45rem;
+                line-height: 1.1;
 
 from auth import AuthClient, AuthConfig, AuthError
 from sync import DOWNLOAD_DIR, SYNC_INTERVAL_SECONDS, sync_once, _was_notified, _mark_notified, _get_semester_from_subject
@@ -25,14 +26,16 @@ import database as db
 from telegram_notifier import notify_new_lecture, notify_multiple_lectures
 
 load_dotenv(override=True)
+                margin: 0.15rem 0;
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
+                padding: 1.25rem 1.75rem;
 # Get base URL from environment or detect from request
 BASE_URL = os.getenv("BASE_URL", "https://swiftsync-013r.onrender.com")
-IS_PRODUCTION = os.getenv("RENDER", "") != ""  # Detect if running on Render
-
-# Debug: Check if API key is loaded
+                display: grid;
+                grid-template-columns: 1fr auto;
+                align-items: center;
+                column-gap: 1rem;
 _gemini_key = os.getenv("GEMINI_API_KEY")
 _openai_key = os.getenv("OPENAI_API_KEY")
 SECRET_ADMIN_KEY = os.getenv("SECRET_ADMIN_KEY", "emadCyberSoft4SOC")
@@ -47,15 +50,19 @@ else:
 # Log admin key for debugging
 if SECRET_ADMIN_KEY:
     logger.info("✓ Admin SOC key configured (hidden for security)")
+                min-width: 0;
+                padding-right: 0.5rem;
+                word-break: break-word;
 else:
     logger.warning("⚠ No admin key found, using default")
-
+                font-size: 1.3rem;
+                flex-shrink: 0;
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
     # Startup
-    logger.info("Background sync worker disabled temporarily")
-    # Temporarily disabled to avoid auth conflicts
+                gap: 1.25rem;
+                padding: 1.25rem 1.6rem;
     # asyncio.create_task(sync_worker())
     
     yield
@@ -79,20 +86,22 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins for PWA
     allow_credentials=True,
+                padding-right: 0.5rem;
     allow_methods=["*"],
     allow_headers=["*"],
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Ensure the lectures_storage directory exists before mounting
-DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+                gap: 0.75rem;
 app.mount("/files", StaticFiles(directory=DOWNLOAD_DIR, html=False), name="files")
 
-# Mount static directory for PWA assets (icons, screenshots)
+                color: var(--text-tertiary);
+                margin-right: 0.35rem;
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
-app.mount("/static", StaticFiles(directory="static", html=False), name="static")
-
+                width: 36px;
+                height: 36px;
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon() -> FileResponse:
@@ -103,6 +112,7 @@ async def favicon() -> FileResponse:
     raise HTTPException(status_code=404, detail="Favicon not found")
 
 
+                justify-self: end;
 def get_real_client_ip(request: Request) -> str:
     """
     Get the real client IP address from request, handling all proxy headers.
@@ -2050,6 +2060,12 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                 font-size: 1.75rem;
                 font-weight: 800;
                 background: linear-gradient(90deg, var(--kurdish-red) 0%, var(--kurdish-yellow) 50%, var(--kurdish-green) 100%);
+            .logo-text {{
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                gap: 0.15rem;
+            }}
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
@@ -2061,7 +2077,8 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                 font-size: 0.875rem;
                 font-weight: 500;
                 margin-top: 0.25rem;
-            }}
+                row-gap: 0.35rem;
+                flex-direction: column;
             
             .stats-grid {{
                 display: grid;
@@ -2071,7 +2088,8 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
             }}
             
             .stat-card {{
-                background: rgba(30, 41, 59, 0.8);
+                flex-shrink: 0;
+                display: inline-flex;
                 padding: 1.5rem;
                 border-radius: 12px;
                 border: 1px solid var(--border);
@@ -3630,6 +3648,7 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 gap: 0.6rem;
                 align-items: center;
+                flex-wrap: wrap;
             }}
             
             /* Kurdish Text Animation (in navbar) - Fixed size to prevent layout shift */
@@ -3894,12 +3913,13 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .subject-header {{
-                padding: 1.25rem 1.6rem;
+                padding: 1.25rem 1.75rem;
                 background: var(--bg-tertiary);
                 cursor: pointer;
-                display: flex;
-                justify-content: space-between;
+                display: grid;
+                grid-template-columns: 1fr auto;
                 align-items: center;
+                column-gap: 1rem;
                 transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
                 user-select: none;
                 -webkit-tap-highlight-color: transparent;
@@ -3929,11 +3949,16 @@ async def dashboard() -> HTMLResponse:
                 color: var(--text-primary);
                 line-height: 1.35;
                 flex-wrap: wrap;
+                min-width: 0;
+                padding-right: 0.5rem;
+                word-break: break-word;
+                row-gap: 0.35rem;
             }}
             
             .subject-title i {{
                 font-size: 1.3rem;
                 color: var(--accent);
+                flex-shrink: 0;
             }}
             
             .file-count {{
@@ -3944,6 +3969,8 @@ async def dashboard() -> HTMLResponse:
                 border-radius: 50px;
                 margin-left: 0.75rem;
                 white-space: nowrap;
+                flex-shrink: 0;
+                display: inline-flex;
             }}
             
             .collapse-btn {{
@@ -3959,6 +3986,7 @@ async def dashboard() -> HTMLResponse:
                 justify-content: center;
                 transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 will-change: transform, background;
+                justify-self: end;
             }}
             
             .collapse-btn:hover {{
@@ -4513,6 +4541,7 @@ async def dashboard() -> HTMLResponse:
             
             .zone-tab i {{
                 font-size: 1.1rem;
+                flex-shrink: 0;
             }}
             
             .zone-content {{
@@ -4568,6 +4597,7 @@ async def dashboard() -> HTMLResponse:
             
             .private-subtab i {{
                 font-size: 1rem;
+                flex-shrink: 0;
             }}
             
             .private-section {{
@@ -4741,6 +4771,12 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 align-items: center;
                 gap: 0.75rem;
+                flex-wrap: wrap;
+                min-width: 0;
+            }}
+
+            .attendance-header h2 i {{
+                flex-shrink: 0;
             }}
             
             .logout-btn {{
@@ -4800,6 +4836,7 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
+                column-gap: 1rem;
                 margin-bottom: 1.25rem;
                 padding-bottom: 0.85rem;
                 border-bottom: 1px solid var(--border);
@@ -4807,6 +4844,7 @@ async def dashboard() -> HTMLResponse:
             
             .module-info {{
                 flex: 1;
+                min-width: 0;
             }}
             
             .module-name {{
@@ -4817,6 +4855,7 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 align-items: center;
                 gap: 0.75rem;
+                word-break: break-word;
             }}
             
             .module-name i {{
@@ -4830,6 +4869,7 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 align-items: center;
                 gap: 0.5rem;
+                flex-wrap: wrap;
             }}
             
             .class-name i {{
@@ -5331,12 +5371,15 @@ async def dashboard() -> HTMLResponse:
             /* Responsive */
             @media (max-width: 768px) {{
                 .container {{ padding: 1.5rem 1rem; }}
-                .nav {{ flex-direction: column; gap: 1rem; }}
+                .nav {{ flex-direction: column; gap: 0.9rem; padding: 1.1rem 1.25rem; text-align: center; }}
+                .logo {{ justify-content: center; }}
+                .nav-actions {{ width: 100%; justify-content: center; }}
+                .kurdish-text {{ width: 100%; }}
                 /* Hide install button on mobile - use browser menu instead */
                 .install-btn {{
                     display: none !important;
                 }}
-                .kurdish-text {{ font-size: 0.9rem; width: 280px; min-height: 22px; }}
+                .kurdish-text {{ font-size: 0.9rem; width: 100%; min-height: 22px; }}
                 .stats {{ grid-template-columns: 1fr; }}
                 .toolbar {{ flex-direction: column; align-items: stretch; }}
                 .search-box {{ min-width: 100%; }}
@@ -5360,10 +5403,12 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 .subject-header {{
-                    padding: 1.25rem 1rem;
-                    flex-direction: column;
+                    padding: 1.25rem 1.15rem;
+                    display: grid;
+                    grid-template-columns: 1fr;
                     align-items: flex-start;
-                    gap: 1rem;
+                    row-gap: 1rem;
+                    padding-right: 3.1rem;
                 }}
                 
                 .subject-title {{
