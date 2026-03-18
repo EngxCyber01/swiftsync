@@ -3439,26 +3439,35 @@ async def dashboard() -> HTMLResponse:
                 position: relative;
                 z-index: 1;
             }}
+
+            :root {{
+                --card-pad-x: 1.35rem;
+                --card-pad-y: 1.2rem;
+                --mobile-card-pad-x: 1.1rem;
+                --mobile-card-pad-y: 1rem;
+                --icon-gap: 0.9rem;
+            }}
             
             /* Header */
             .nav {{
-                display: flex;
-                justify-content: space-between;
+                display: grid;
+                grid-template-columns: minmax(240px, 1fr) minmax(260px, 1.2fr) auto;
                 align-items: center;
-                padding: 1.25rem 1.75rem;
-                margin-bottom: 2.5rem;
+                column-gap: 1rem;
+                padding: 1.05rem 1.25rem;
+                margin-bottom: 2rem;
                 background: rgba(22, 33, 62, 0.6);
                 backdrop-filter: blur(5px);
                 border-radius: var(--radius-lg);
                 border: 1px solid rgba(34, 211, 238, 0.35);
                 box-shadow: var(--shadow-soft);
-                gap: 1.5rem;
             }}
             
             .logo {{
                 display: flex;
                 align-items: center;
-                gap: 1rem;
+                gap: 0.8rem;
+                min-width: 0;
             }}
             
             .logo-icon {{
@@ -3497,12 +3506,22 @@ async def dashboard() -> HTMLResponse:
             .logo-text h1 {{
                 font-size: 1.45rem;
                 font-weight: 900;
+                line-height: 1.08;
+                margin: 0;
                 background: linear-gradient(135deg, #22d3ee 0%, #38bdf8 40%, #a5f3fc 80%, #e5e7eb 100%);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
                 letter-spacing: -0.02em;
                 animation: shimmer 3s ease-in-out infinite;
+            }}
+
+            .logo-text {{
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                min-width: 0;
+                gap: 0.15rem;
             }}
             
             @keyframes shimmer {{
@@ -3522,7 +3541,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .year-badge {{
-                padding: 0.45rem 0.95rem;
+                padding: 0.5rem 1rem;
                 background: rgba(0, 217, 255, 0.15);
                 border: 1px solid rgba(0, 217, 255, 0.3);
                 border-radius: 10px;
@@ -3623,9 +3642,10 @@ async def dashboard() -> HTMLResponse:
             
             .nav-actions {{
                 display: flex;
-                gap: 0.6rem;
+                gap: 0.65rem;
                 align-items: center;
                 flex-wrap: wrap;
+                justify-content: flex-end;
             }}
             
             /* Kurdish Text Animation (in navbar) - Fixed size to prevent layout shift */
@@ -3639,7 +3659,8 @@ async def dashboard() -> HTMLResponse:
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
-                width: 320px;
+                width: 100%;
+                max-width: 360px;
                 height: 30px;
                 min-height: 30px;
                 text-align: center;
@@ -3890,13 +3911,13 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .subject-header {{
-                padding: 1.25rem 1.75rem;
+                padding: var(--card-pad-y) var(--card-pad-x);
                 background: var(--bg-tertiary);
                 cursor: pointer;
                 display: grid;
-                grid-template-columns: 1fr auto;
+                grid-template-columns: minmax(0, 1fr) auto;
                 align-items: center;
-                column-gap: 1rem;
+                column-gap: 0.9rem;
                 transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
                 user-select: none;
                 -webkit-tap-highlight-color: transparent;
@@ -3920,22 +3941,24 @@ async def dashboard() -> HTMLResponse:
             .subject-title {{
                 display: flex;
                 align-items: center;
-                gap: 0.85rem;
+                gap: var(--icon-gap);
                 font-size: 1.02rem;
                 font-weight: 700;
                 color: var(--text-primary);
                 line-height: 1.35;
                 flex-wrap: wrap;
                 min-width: 0;
-                padding-right: 0.5rem;
+                padding-right: 0.25rem;
                 word-break: break-word;
                 row-gap: 0.35rem;
+                overflow-wrap: anywhere;
             }}
             
             .subject-title i {{
                 font-size: 1.3rem;
                 color: var(--accent);
                 flex-shrink: 0;
+                margin-right: 0.05rem;
             }}
             
             .file-count {{
@@ -3964,6 +3987,8 @@ async def dashboard() -> HTMLResponse:
                 transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
                 will-change: transform, background;
                 justify-self: end;
+                margin-right: 0.1rem;
+                flex-shrink: 0;
             }}
             
             .collapse-btn:hover {{
@@ -3992,7 +4017,7 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .subject-files {{
-                padding: 1.25rem;
+                padding: var(--card-pad-y) var(--card-pad-x);
                 display: none;
             }}
             
@@ -4000,8 +4025,8 @@ async def dashboard() -> HTMLResponse:
             .file-item {{
                 display: flex;
                 align-items: center;
-                gap: 1.25rem;
-                padding: 1.25rem;
+                gap: 1rem;
+                padding: var(--card-pad-y) var(--card-pad-x);
                 background: var(--bg-tertiary);
                 border: 1px solid var(--border);
                 border-radius: var(--radius-md);
@@ -4052,6 +4077,7 @@ async def dashboard() -> HTMLResponse:
             .file-info {{
                 flex: 1;
                 min-width: 0;
+                padding-right: 0.2rem;
             }}
             
             .file-name {{
@@ -4066,6 +4092,7 @@ async def dashboard() -> HTMLResponse:
                 -webkit-line-clamp: 2;
                 -webkit-box-orient: vertical;
                 overflow: hidden;
+                overflow-wrap: anywhere;
             }}
             
             .file-meta {{
@@ -4106,6 +4133,7 @@ async def dashboard() -> HTMLResponse:
                 white-space: nowrap;
                 touch-action: manipulation;
                 -webkit-tap-highlight-color: transparent;
+                flex-shrink: 0;
             }}
             
             .open-btn:hover {{
@@ -4136,6 +4164,7 @@ async def dashboard() -> HTMLResponse:
                 white-space: nowrap;
                 touch-action: manipulation;
                 -webkit-tap-highlight-color: transparent;
+                flex-shrink: 0;
             }}
             
             .download-btn:hover {{
@@ -4167,6 +4196,7 @@ async def dashboard() -> HTMLResponse:
                 box-shadow: 0 4px 12px rgba(220, 20, 60, 0.3);
                 touch-action: manipulation;
                 -webkit-tap-highlight-color: transparent;
+                flex-shrink: 0;
             }}
             
             .summary-btn:hover {{
@@ -4462,7 +4492,7 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 gap: 0.75rem;
                 margin-bottom: 1.6rem;
-                padding: 0.35rem;
+                padding: 0.45rem;
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
                 border-radius: var(--radius-lg);
@@ -4537,7 +4567,7 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 gap: 0.75rem;
                 margin-bottom: 1.5rem;
-                padding: 0.4rem;
+                padding: 0.5rem;
                 background: var(--bg-tertiary);
                 border: 1px solid var(--border);
                 border-radius: var(--radius-lg);
@@ -4545,7 +4575,7 @@ async def dashboard() -> HTMLResponse:
             
             .private-subtab {{
                 flex: 1;
-                padding: 0.7rem 1.1rem;
+                padding: 0.75rem 1.15rem;
                 background: transparent;
                 border: none;
                 border-radius: var(--radius-md);
@@ -4786,7 +4816,7 @@ async def dashboard() -> HTMLResponse:
                 background: var(--bg-secondary);
                 border: 1px solid var(--border);
                 border-radius: var(--radius-lg);
-                padding: 1.75rem;
+                padding: 1.5rem var(--card-pad-x);
                 margin-bottom: 1.5rem;
                 transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
                 position: relative;
@@ -4813,7 +4843,7 @@ async def dashboard() -> HTMLResponse:
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                column-gap: 1rem;
+                column-gap: 1.25rem;
                 margin-bottom: 1.25rem;
                 padding-bottom: 0.85rem;
                 border-bottom: 1px solid var(--border);
@@ -4831,7 +4861,7 @@ async def dashboard() -> HTMLResponse:
                 margin-bottom: 0.5rem;
                 display: flex;
                 align-items: center;
-                gap: 0.75rem;
+                gap: var(--icon-gap);
                 word-break: break-word;
             }}
             
@@ -4845,7 +4875,7 @@ async def dashboard() -> HTMLResponse:
                 color: var(--text-secondary);
                 display: flex;
                 align-items: center;
-                gap: 0.5rem;
+                gap: 0.6rem;
                 flex-wrap: wrap;
             }}
             
@@ -5348,8 +5378,16 @@ async def dashboard() -> HTMLResponse:
             /* Responsive */
             @media (max-width: 768px) {{
                 .container {{ padding: 1.5rem 1rem; }}
-                .nav {{ flex-direction: column; gap: 0.9rem; padding: 1.1rem 1.25rem; text-align: center; }}
-                .logo {{ justify-content: center; }}
+                .nav {{
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.75rem;
+                    padding: 0.95rem 1rem;
+                    text-align: center;
+                }}
+                .logo {{ justify-content: center; gap: 0.75rem; width: 100%; }}
+                .logo-icon {{ width: 52px; height: 52px; font-size: 24px; border-radius: 14px; }}
+                .logo-text h1 {{ font-size: 1.32rem; }}
                 .nav-actions {{ width: 100%; justify-content: center; }}
                 .kurdish-text {{ width: 100%; }}
                 /* Hide install button on mobile - use browser menu instead */
@@ -5364,14 +5402,14 @@ async def dashboard() -> HTMLResponse:
                 .modal-header {{ padding: 1.5rem; }}
                 .modal-body {{ padding: 1.5rem; }}
                 
-                .zone-tabs {{ flex-direction: column; gap: 0.35rem; margin-bottom: 1.1rem; padding: 0.3rem; border-radius: 16px; }}
+                .zone-tabs {{ flex-direction: column; gap: 0.4rem; margin-bottom: 1.1rem; padding: 0.4rem; border-radius: 16px; }}
                 .zone-tab {{ padding: 0.55rem 0.9rem; font-size: 0.88rem; border-radius: 12px; gap: 0.45rem; min-height: 44px; }}
                 .zone-tab i {{ font-size: 0.95rem; }}
                 .zone-tab .tab-meta {{ font-size: 0.72rem; }}
                 .attendance-login-card {{ padding: 1.75rem 1.25rem; margin: 2.5rem auto; }}
                 .attendance-header {{ flex-direction: column; gap: 1rem; align-items: flex-start; }}
-                .private-subtabs {{ gap: 0.5rem; padding: 0.3rem; border-radius: 16px; }}
-                .private-subtab {{ padding: 0.55rem 0.85rem; font-size: 0.85rem; min-height: 42px; }}
+                .private-subtabs {{ gap: 0.5rem; padding: 0.4rem; border-radius: 16px; }}
+                .private-subtab {{ padding: 0.6rem 0.9rem; font-size: 0.85rem; min-height: 42px; }}
                 
                 /* Mobile-specific: Subject sections - better spacing */
                 .subject-section {{
@@ -5380,19 +5418,19 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 .subject-header {{
-                    padding: 1.25rem 1.15rem;
+                    padding: var(--mobile-card-pad-y) var(--mobile-card-pad-x);
                     display: grid;
-                    grid-template-columns: 1fr;
-                    align-items: flex-start;
-                    row-gap: 1rem;
-                    padding-right: 3.1rem;
+                    grid-template-columns: minmax(0, 1fr) auto;
+                    align-items: center;
+                    column-gap: 0.8rem;
                 }}
                 
                 .subject-title {{
                     font-size: 1rem;
-                    gap: 0.75rem;
+                    gap: 0.7rem;
                     flex-wrap: wrap;
                     width: 100%;
+                    padding-right: 0;
                 }}
                 
                 .subject-title i {{
@@ -5407,23 +5445,23 @@ async def dashboard() -> HTMLResponse:
                 }}
                 
                 .collapse-btn {{
-                    position: absolute;
-                    top: 1.25rem;
-                    right: 1rem;
+                    position: static;
+                    justify-self: end;
                     width: 36px;
                     height: 36px;
+                    margin-right: 0;
                 }}
                 
                 /* Mobile-specific: File items - organized and comfortable */
                 .subject-files {{
-                    padding: 1rem;
+                    padding: var(--mobile-card-pad-y) var(--mobile-card-pad-x);
                 }}
                 
                 .file-item {{
                     flex-direction: column;
                     align-items: stretch;
                     gap: 1rem;
-                    padding: 1.25rem 1rem;
+                    padding: var(--mobile-card-pad-y) var(--mobile-card-pad-x);
                     margin-bottom: 1rem;
                 }}
                 
@@ -5486,7 +5524,7 @@ async def dashboard() -> HTMLResponse:
                 
                 /* Mobile-specific: Attendance section - better spacing and readability */
                 .attendance-card {{
-                    padding: 1.4rem 1rem;
+                    padding: 1.25rem var(--mobile-card-pad-x);
                     margin-bottom: 1.2rem;
                     border-radius: 16px;
                 }}
