@@ -40,7 +40,7 @@ if _gemini_key and _gemini_key != "your_gemini_api_key_here":
 elif _openai_key and _openai_key != "your_openai_api_key_here":
     logger.info(f"[OK] OpenAI API key loaded (starts with: {_openai_key[:20]}...)")
 else:
-    logger.warning("[WARN] No AI API key configured. Set GEMINI_API_KEY (free) or OPENAI_API_KEY")
+    logger.debug("[DEBUG] No AI API key configured - summarization features disabled")
 
 # Log admin key for debugging
 if SECRET_ADMIN_KEY:
@@ -3465,26 +3465,22 @@ async def dashboard() -> HTMLResponse:
                 width: 56px;
                 height: 56px;
                 border-radius: 16px;
-                overflow: hidden;
+                overflow: visible;
                 position: relative;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                background: radial-gradient(circle at 30% 20%, #22d3ee 0%, #14b8a6 35%, #020617 100%);
+                background: linear-gradient(135deg, #22d3ee 0%, #14b8a6 50%, #0ea5e9 100%);
                 box-shadow: 0 0 22px rgba(34, 211, 238, 0.7);
                 animation: logoPulse 4s ease-in-out infinite;
+                font-size: 28px;
+                font-weight: 900;
+                color: white;
+                text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
             }}
             .logo-icon::before,
             .logo-icon::after {{
                 content: none;
-            }}
-
-            .logo-icon img {{
-                width: 120%;
-                height: 120%;
-                object-fit: cover;
-                border-radius: inherit;
-                display: block;
             }}
 
             @keyframes logoPulse {{
@@ -5629,7 +5625,7 @@ async def dashboard() -> HTMLResponse:
             <nav class="nav">
                 <div class="logo">
                     <div class="logo-icon">
-                        <img src="/static/icons/me.png?v={logo_version}" alt="SwiftSync Logo" />
+                        <i class="fas fa-bolt"></i>
                     </div>
                     <div class="logo-text">
                         <h1>SwiftSync</h1>
