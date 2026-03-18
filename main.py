@@ -1060,14 +1060,13 @@ async def get_official_results(request: Request, session_token: str = None) -> J
                         'error': 'Unauthorized. Session may have expired.',
                         'results': []
                     }
-                
+
                 if response.status_code != 200:
                     return {
                         'success': False,
                         'error': f'Failed to fetch results. Status code: {response.status_code}',
                         'results': []
                     }
-                
                 # Parse response (HTML or JSON)
                 try:
                     content_type = response.headers.get('Content-Type', '')
@@ -5956,6 +5955,7 @@ async def dashboard() -> HTMLResponse:
             var attendanceSessionToken = safeStorage.getItem('attendance_session_token') || null;
             var attendanceUsername = safeStorage.getItem('attendance_username') || null;
             var attendanceRefreshInterval = null;
+            var privateDataBootstrapped = false;
             
             // Data cache for private sections (cleared on logout)
             var cachedResultAlerts = null;
@@ -5972,6 +5972,9 @@ async def dashboard() -> HTMLResponse:
             var inFlightAttendance = null;
             var inFlightResultAlerts = null;
             var inFlightOfficialResults = null;
+
+            // Security hardening: do not keep saved plaintext credentials in storage.
+            safeStorage.removeItem('attendance_credentials');
 
             // LocalStorage-only persistence for private data (DO NOT use cookies)
             // This makes Result Alerts + Results behave like Attendance across refresh.
@@ -6096,8 +6099,47 @@ async def dashboard() -> HTMLResponse:
             }}
 
             function shouldBackgroundRefresh(cachedAt, maxAgeMs = 30000) {{
-                if (!cachedAt) return true;
-                return (Date.now() - cachedAt) > maxAgeMs;
+                // Keep private datasets stable during session unless user explicitly logs out.
+                return false;
+            }}
+
+            async function apiFetchJson(url, options = {{}}, retries = 2, timeoutMs = 12000) {{
+                for (let attempt = 0; attempt <= retries; attempt++) {{
+                    const controller = new AbortController();
+                    const timer = setTimeout(() => controller.abort(), timeoutMs);
+                    try {{
+                        const response = await fetch(url, {{
+                            method: options.method || 'GET',
+                            headers: {{
+                                'Content-Type': 'application/json',
+                                'X-Requested-With': 'XMLHttpRequest',
+                                ...(options.headers || {{}})
+                            }},
+                            body: options.body,
+                            credentials: 'same-origin',
+                            cache: 'no-store',
+                            signal: controller.signal
+                        }});
+                        clearTimeout(timer);
+
+                        if (!response.ok) {{
+                            if (attempt < retries && response.status >= 500) {{
+                                await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
+                                continue;
+                            }}
+                            throw new Error(`HTTP ${{response.status}}`);
+                        }}
+
+                        return await response.json();
+                    }} catch (err) {{
+                        clearTimeout(timer);
+                        if (attempt < retries) {{
+                            await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
+                            continue;
+                        }}
+                        throw err;
+                    }}
+                }}
             }}
 
             function preloadPrivateData(options = {{}}) {{
@@ -6112,13 +6154,13 @@ async def dashboard() -> HTMLResponse:
                 }}
 
                 if (!inFlightResultAlerts) {{
-                    if (forceRefresh || !cachedResultAlerts || shouldBackgroundRefresh(cachedResultAlertsAt)) {{
+                    if (forceRefresh || !cachedResultAlerts) {{
                         fetchResultAlerts(true);
                     }}
                 }}
 
                 if (!inFlightOfficialResults) {{
-                    if (forceRefresh || !cachedOfficialResults || shouldBackgroundRefresh(cachedOfficialResultsAt)) {{
+                    if (forceRefresh || !cachedOfficialResults) {{
                         fetchOfficialResults(true);
                     }}
                 }}
@@ -6867,10 +6909,6 @@ async def dashboard() -> HTMLResponse:
                         if (cachedResultAlerts) {{
                             // Instantly show cached data
                             renderResultsCards(cachedResultAlerts.results, cachedResultAlerts.totalCount);
-                            // Optional: background refresh without showing spinner (avoid immediate duplicates)
-                            if (shouldBackgroundRefresh(cachedResultAlertsAt)) {{
-                                fetchResultAlerts(true);
-                            }}
                         }} else if (inFlightResultAlerts) {{
                             // Preload already running - show loading UI but don't duplicate request
                             document.getElementById('resultsContent').innerHTML = `
@@ -6894,10 +6932,6 @@ async def dashboard() -> HTMLResponse:
                         if (cachedOfficialResults) {{
                             // Instantly show cached data
                             renderOfficialResults(cachedOfficialResults);
-                            // Optional: background refresh without showing spinner (avoid immediate duplicates)
-                            if (shouldBackgroundRefresh(cachedOfficialResultsAt)) {{
-                                fetchOfficialResults(true);
-                            }}
                         }} else if (inFlightOfficialResults) {{
                             // Preload already running - show loading UI but don't duplicate request
                             document.getElementById('officialResultsContent').innerHTML = `
@@ -6930,28 +6964,7 @@ async def dashboard() -> HTMLResponse:
                     safeStorage.removeItem('attendance_session_timestamp');
                 }}
                 
-                // Check for saved credentials (encrypted in base64)
-                const savedCreds = safeStorage.getItem('attendance_credentials');
-                
-                if (savedCreds && !attendanceSessionToken) {{
-                    // Auto-fill and auto-login
-                    try {{
-                        const creds = JSON.parse(atob(savedCreds));
-                        document.getElementById('attendanceUsername').value = creds.u;
-                        document.getElementById('attendancePassword').value = creds.p;
-                        document.getElementById('rememberMe').checked = true;
-                        
-                        // Auto-login silently
-                        setTimeout(() => {{
-                            document.getElementById('attendanceLoginForm').dispatchEvent(new Event('submit'));
-                        }}, 100);
-                    }} catch (e) {{
-                        console.error('Failed to load saved credentials');
-                        // Show login form
-                        document.getElementById('privateLoginArea').style.display = 'block';
-                        document.getElementById('privateDataArea').style.display = 'none';
-                    }}
-                }} else if (attendanceSessionToken) {{
+                if (attendanceSessionToken) {{
                     // User has a valid session, try to load attendance data
                     updateSessionTimestamp(); // Refresh session
                     ensurePrivateCacheOwner();
@@ -6959,22 +6972,36 @@ async def dashboard() -> HTMLResponse:
                     // Rehydrate all private caches from localStorage so tabs are instant after refresh
                     rehydratePrivateCaches();
 
-                    // If we already have cached attendance, paint instantly then refresh silently
+                    // If we already have cached attendance, paint instantly and keep data stable.
                     if (cachedAttendanceData && cachedAttendanceData.html) {{
                         document.getElementById('privateLoginArea').style.display = 'none';
                         document.getElementById('privateDataArea').style.display = 'block';
                         renderAttendanceCards(cachedAttendanceData.html, cachedAttendanceData.fullName || attendanceUsername);
-                        loadAttendanceData(true);
+
+                        if (cachedResultAlerts) {{
+                            renderResultsCards(cachedResultAlerts.results, cachedResultAlerts.totalCount);
+                        }}
+                        if (cachedOfficialResults) {{
+                            renderOfficialResults(cachedOfficialResults);
+                        }}
+
+                        if (!privateDataBootstrapped) {{
+                            preloadPrivateData({{ skipAttendance: true, forceRefresh: false }});
+                            privateDataBootstrapped = true;
+                        }}
                     }} else {{
                         loadAttendanceData(false);
+                        preloadPrivateData({{ skipAttendance: true, forceRefresh: false }});
                     }}
 
-                    // Preload the other private sections in background
-                    preloadPrivateData({{ skipAttendance: true }});
-
-                    // Ensure auto-refresh continues for attendance
-                    startAttendanceAutoRefresh();
+                    // Keep data fixed during active session (no periodic forced reloads).
+                    stopAttendanceAutoRefresh();
                 }} else {{
+                    const savedUsername = safeStorage.getItem('attendance_saved_username');
+                    if (savedUsername) {{
+                        document.getElementById('attendanceUsername').value = savedUsername;
+                        document.getElementById('rememberMe').checked = true;
+                    }}
                     // Show login form
                     document.getElementById('privateLoginArea').style.display = 'block';
                     document.getElementById('privateDataArea').style.display = 'none';
@@ -6986,21 +7013,9 @@ async def dashboard() -> HTMLResponse:
                 if (attendanceRefreshInterval) {{
                     clearInterval(attendanceRefreshInterval);
                 }}
-                
-                // Refresh every 60 seconds
-                attendanceRefreshInterval = setInterval(() => {{
-                    if (attendanceSessionToken) {{
-                        console.log('Auto-refreshing attendance data...');
-                        // Silent attendance refresh
-                        loadAttendanceData(true);
 
-                        // Also refresh Result Alerts + Results in the
-                        // background so new notifications and official
-                        // results are synced automatically for this
-                        // logged-in student.
-                        preloadPrivateData({{ skipAttendance: true }});
-                    }}
-                }}, 60000); // 60 seconds
+                // Intentionally disabled to keep private data stable until explicit logout.
+                attendanceRefreshInterval = null;
             }}
             
             function stopAttendanceAutoRefresh() {{
@@ -7029,18 +7044,7 @@ async def dashboard() -> HTMLResponse:
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Authenticating...</span>';
                 
                 try {{
-                    var response = await fetch(`/api/attendance/login?username=${{encodeURIComponent(username)}}&password=${{encodeURIComponent(password)}}`, {{
-                        method: 'POST',
-                        headers: {{
-                            'Content-Type': 'application/json'
-                        }}
-                    }});
-                    
-                    if (!response.ok) {{
-                        throw new Error(`HTTP error! status: ${{response.status}}`);
-                    }}
-                    
-                    var result = await response.json();
+                    var result = await apiFetchJson(`/api/attendance/login?username=${{encodeURIComponent(username)}}&password=${{encodeURIComponent(password)}}`, {{ method: 'POST' }}, 1, 12000);
                     
                     if (result.success) {{
                         // Save session token
@@ -7058,16 +7062,11 @@ async def dashboard() -> HTMLResponse:
                         // Set session timestamp (7 days expiration)
                         updateSessionTimestamp();
                         
-                        // Save credentials if remember me is checked (encrypted)
+                        // Security: store only username preference, never password.
                         if (rememberMe) {{
-                            const creds = btoa(JSON.stringify({{ u: username, p: password }}));
-                            const savedOk = safeStorage.setItem('attendance_credentials', creds);
-                            if (!savedOk && !window.__storageWarningShown) {{
-                                window.__storageWarningShown = true;
-                                showNotification('Saved login is unavailable on this browser. You can still log in normally.', 'error');
-                            }}
+                            safeStorage.setItem('attendance_saved_username', username);
                         }} else {{
-                            safeStorage.removeItem('attendance_credentials');
+                            safeStorage.removeItem('attendance_saved_username');
                         }}
 
                         // Fetch ALL private data during login loading, so tabs are instant after login.
@@ -7080,8 +7079,8 @@ async def dashboard() -> HTMLResponse:
 
                         // Attendance is required to enter private mode
                         await attendancePromise;
-                        // Wait for the other private sections to finish so they don't show loading after login
                         await Promise.allSettled([resultAlertsPromise, officialResultsPromise]);
+                        privateDataBootstrapped = true;
 
                         // Now reveal private mode UI (everything should be ready)
                         document.getElementById('privateLoginArea').style.display = 'none';
@@ -7097,8 +7096,8 @@ async def dashboard() -> HTMLResponse:
                             switchPrivateSection('attendance');
                         }}
                         
-                        // Start auto-refresh
-                        startAttendanceAutoRefresh();
+                        // Keep private data fixed during active session.
+                        stopAttendanceAutoRefresh();
                         
                         console.log('✅ Login successful - session valid for 7 days');
                     }} else {{
@@ -7357,8 +7356,7 @@ async def dashboard() -> HTMLResponse:
                 inFlightAttendance = (async () => {{
                     try {{
                         // Fetch attendance data first
-                        const attendanceResponse = await fetch(`/api/attendance/data?session_token=${{encodeURIComponent(requestToken)}}`);
-                        const attendanceResult = await attendanceResponse.json();
+                        const attendanceResult = await apiFetchJson(`/api/attendance/data?session_token=${{encodeURIComponent(requestToken)}}`, {{}}, 2, 12000);
                     
                         // If user logged out / switched user while request was in-flight, ignore results
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
@@ -7378,8 +7376,7 @@ async def dashboard() -> HTMLResponse:
                         }} else {{
                             // Try to fetch from profile API
                             try {{
-                                const profileResponse = await fetch(`/api/attendance/profile?session_token=${{encodeURIComponent(attendanceSessionToken)}}`);
-                                const profileResult = await profileResponse.json();
+                                const profileResult = await apiFetchJson(`/api/attendance/profile?session_token=${{encodeURIComponent(attendanceSessionToken)}}`, {{}}, 1, 9000);
                                 
                                 if (profileResult.success) {{
                                     const firstName = profileResult.first_name || '';
@@ -7464,7 +7461,9 @@ async def dashboard() -> HTMLResponse:
                 safeStorage.removeItem('attendance_session_token');
                 safeStorage.removeItem('attendance_username');
                 safeStorage.removeItem('attendance_credentials');
+                safeStorage.removeItem('attendance_saved_username');
                 safeStorage.removeItem('attendance_session_timestamp');
+                privateDataBootstrapped = false;
                 
                 // Clear all cached private data
                 clearPrivateCaches();
@@ -7522,8 +7521,7 @@ async def dashboard() -> HTMLResponse:
 
                 inFlightResultAlerts = (async () => {{
                     try {{
-                        const response = await fetch(`/api/results/data?session_token=${{encodeURIComponent(requestToken)}}`);
-                        const result = await response.json();
+                        const result = await apiFetchJson(`/api/results/data?session_token=${{encodeURIComponent(requestToken)}}`, {{}}, 2, 12000);
                     
                         // If user logged out / switched user while request was in-flight, ignore results
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
@@ -7848,8 +7846,7 @@ async def dashboard() -> HTMLResponse:
 
                 inFlightOfficialResults = (async () => {{
                     try {{
-                        const response = await fetch(`/api/official-results/data?session_token=${{encodeURIComponent(requestToken)}}`);
-                        const result = await response.json();
+                        const result = await apiFetchJson(`/api/official-results/data?session_token=${{encodeURIComponent(requestToken)}}`, {{}}, 2, 15000);
                     
                         // If user logged out / switched user while request was in-flight, ignore results
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
@@ -8229,7 +8226,7 @@ async def dashboard() -> HTMLResponse:
                     console.log('⏰ Session timestamp:', safeStorage.getItem('attendance_session_timestamp'));
                     // Switch to attendance zone and load data
                     setTimeout(() => {{
-                        switchZone('attendance');
+                        switchZone('private');
                     }}, 500); // Small delay to ensure DOM is ready
                 }} else if (attendanceSessionToken && isSessionExpired()) {{
                     console.log('⚠️ Session expired, clearing...');
