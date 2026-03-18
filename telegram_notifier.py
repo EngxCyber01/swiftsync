@@ -3,18 +3,22 @@ Telegram Bot Notifier for SwiftSync
 Sends notifications to Telegram group when new lectures are uploaded
 """
 import logging
+import os
 import requests
 from datetime import datetime
 import pytz
 from typing import Optional
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 # Telegram Configuration
-TELEGRAM_BOT_TOKEN = "8219473970:AAGlDEoRDCV1PMfRgvkrLMmGXiHfCfrzMXQ"
-TELEGRAM_GROUP_ID = "-1003523536992"
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_GROUP_ID = os.getenv("TELEGRAM_GROUP_ID", "").strip()
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else ""
 
 
 def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
@@ -29,13 +33,19 @@ def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
         True if message was sent successfully, False otherwise
     """
     try:
+        if not TELEGRAM_BOT_TOKEN or not TELEGRAM_GROUP_ID:
+            logger.warning("Telegram notification skipped: missing TELEGRAM_BOT_TOKEN or TELEGRAM_GROUP_ID")
+            return False
+
         url = f"{TELEGRAM_API_URL}/sendMessage"
         payload = {
             "chat_id": TELEGRAM_GROUP_ID,
             "text": message,
-            "parse_mode": parse_mode,
             "disable_web_page_preview": False
         }
+
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()

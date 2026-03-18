@@ -25,11 +25,12 @@ echo 2. RENDER DASHBOARD:
 echo    Open: https://dashboard.render.com
 echo.
 echo 3. SET ENVIRONMENT VARIABLES:
-echo    PORTAL_USERNAME=B02052324
-echo    PORTAL_PASSWORD=emadXoshnaw1$
-echo    GEMINI_API_KEY=AIzaSyDSmVBPQwOEPL5dq4tXPU7C8acbyjmZag8
-echo    SECRET_ADMIN_KEY=emadCyberSoft4SOC
-echo    TELEGRAM_BOT_TOKEN=8219473970:AAGlDEoRDCV1PMfRgvkrLMmGXiHfCfrzMXQ
+echo    PORTAL_USERNAME=your_portal_username
+echo    PORTAL_PASSWORD=your_portal_password
+echo    GEMINI_API_KEY=your_gemini_api_key
+echo    SECRET_ADMIN_KEY=your_secret_admin_key
+echo    TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+echo    TELEGRAM_GROUP_ID=your_telegram_group_id
 echo    TELEGRAM_CHAT_ID=-1003523536992
 echo    BASE_URL=https://swiftsync-013r.onrender.com
 echo    RENDER=true
@@ -53,7 +54,7 @@ echo    3. Install PWA (Add to Home Screen)
 echo    4. Download lectures
 echo.
 echo Admin Dashboard:
-echo    https://swiftsync-013r.onrender.com/admin-portal?admin_key=emadCyberSoft4SOC
+echo    https://swiftsync-013r.onrender.com/admin-portal?admin_key=YOUR_ADMIN_KEY
 echo.
 echo ========================================
 echo    ALL SYSTEMS READY!

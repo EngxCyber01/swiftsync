@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import logging
 import os
 import sqlite3
@@ -33,7 +34,11 @@ BASE_URL = os.getenv("BASE_URL", "https://swiftsync-013r.onrender.com")
 IS_PRODUCTION = os.getenv("ENVIRONMENT", "").lower() == "production"
 _gemini_key = os.getenv("GEMINI_API_KEY")
 _openai_key = os.getenv("OPENAI_API_KEY")
-SECRET_ADMIN_KEY = os.getenv("SECRET_ADMIN_KEY", "emadCyberSoft4SOC")
+ADMIN_SECRET_KEY = (os.getenv("SECRET_ADMIN_KEY") or os.getenv("ADMIN_KEY") or "").strip()
+
+
+def _is_valid_admin_key(candidate: str) -> bool:
+    return bool(ADMIN_SECRET_KEY) and hmac.compare_digest(candidate or "", ADMIN_SECRET_KEY)
 
 if _gemini_key and _gemini_key != "your_gemini_api_key_here":
     logger.info(f"[OK] Gemini API key loaded (FREE tier) - starts with: {_gemini_key[:20]}...")
@@ -43,10 +48,10 @@ else:
     logger.debug("[DEBUG] No AI API key configured - summarization features disabled")
 
 # Log admin key for debugging
-if SECRET_ADMIN_KEY:
+if ADMIN_SECRET_KEY:
     logger.info("[OK] Admin SOC key configured (hidden for security)")
 else:
-    logger.warning("[WARN] No admin key found, using default")
+    logger.warning("[WARN] No admin key found")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
@@ -69,10 +74,20 @@ auth_client = AuthClient(AuthConfig())
 # Add compression for faster data transfer (70% smaller responses)
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=6)
 
-# Add CORS middleware for PWA and mobile support
+# Add CORS middleware with safe defaults (allow explicit origins only)
+_allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
+if _allowed_origins_env:
+    _allowed_origins = [origin.strip() for origin in _allowed_origins_env.split(",") if origin.strip()]
+else:
+    _allowed_origins = [
+        BASE_URL,
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for PWA
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -120,6 +135,19 @@ def get_real_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+ALLOW_QUERY_SESSION_TOKEN = os.getenv("ALLOW_QUERY_SESSION_TOKEN", "true").strip().lower() in {"1", "true", "yes"}
+
+
+def _resolve_session_token(request: Request, query_session_token: str = None) -> str:
+    """Prefer HttpOnly cookie; query token remains optional for backward compatibility."""
+    cookie_token = request.cookies.get("session_token")
+    if cookie_token and cookie_token.strip():
+        return cookie_token.strip()
+    if ALLOW_QUERY_SESSION_TOKEN and query_session_token and query_session_token.strip():
+        return query_session_token.strip()
+    return ""
+
+
 # Security Middleware - IP Blocking
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
@@ -156,7 +184,7 @@ async def visitor_tracking_middleware(request: Request, call_next):
     # Allow admin portal access with correct key even if IP is blocked
     if request.url.path.startswith("/admin-portal"):
         admin_key = request.query_params.get("admin_key")
-        if admin_key == SECRET_ADMIN_KEY:
+        if _is_valid_admin_key(admin_key):
             # Log the access and continue
             db.log_visitor(client_ip, f"Admin Portal Access (Bypassed Block)", request.headers.get("user-agent"), request.url.path)
             return await call_next(request)
@@ -423,7 +451,7 @@ async def manual_sync() -> JSONResponse:
 
 
 @app.post("/api/admin/upload-data")
-async def upload_data(package: bytes = None) -> JSONResponse:
+async def upload_data(request: Request, package: bytes = None, admin_key: str = None, x_admin_key: str = Header(default=None)) -> JSONResponse:
     """Admin endpoint to upload database and files from local system"""
     import sqlite3
     import zipfile
@@ -431,8 +459,12 @@ async def upload_data(package: bytes = None) -> JSONResponse:
     import shutil
     from fastapi import File, UploadFile, Header
     
-    # Simple auth check
-    admin_key = os.getenv("ADMIN_KEY", "swiftsync-admin-2026")
+    effective_key = x_admin_key or admin_key
+    if not _is_valid_admin_key(effective_key):
+        return JSONResponse({
+            "success": False,
+            "error": "Unauthorized"
+        }, status_code=401)
     
     # This is a simplified version - in production you'd use proper FastAPI dependency injection
     # For now, just log the upload attempt
@@ -588,16 +620,21 @@ async def download_file(filename: str, request: Request, _: str = None):
     import urllib.parse
     import os
     
-    file_path = DOWNLOAD_DIR / filename
-    
-    if not file_path.exists():
+    safe_filename = Path(filename).name
+    base_dir = DOWNLOAD_DIR.resolve()
+    file_path = (DOWNLOAD_DIR / safe_filename).resolve()
+
+    if base_dir not in file_path.parents:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     
     # Get file size for Content-Length
     file_size = os.path.getsize(file_path)
     
     # URL encode filename for proper header
-    encoded_filename = urllib.parse.quote(filename)
+    encoded_filename = urllib.parse.quote(safe_filename)
     
     # Detect if request is from iOS Safari (enhanced detection)
     user_agent = request.headers.get("User-Agent", "").lower()
@@ -607,11 +644,11 @@ async def download_file(filename: str, request: Request, _: str = None):
     
     # iOS SAFARI FIX: Force download by always using octet-stream for PDFs on iOS
     # Safari's PDF viewer cannot be bypassed reliably, so we force binary download
-    if filename.lower().endswith('.pdf'):
+    if safe_filename.lower().endswith('.pdf'):
         if is_ios:
             # Force download on ALL iOS browsers (Safari, Chrome, Firefox on iOS)
             content_type = 'application/octet-stream'
-            logger.info(f"iOS device detected - forcing PDF download for {filename}")
+            logger.info(f"iOS device detected - forcing PDF download for {safe_filename}")
         else:
             content_type = 'application/pdf'  # Normal behavior for other platforms
     else:
@@ -619,11 +656,11 @@ async def download_file(filename: str, request: Request, _: str = None):
     
     return FileResponse(
         path=file_path,
-        filename=filename,
+        filename=safe_filename,
         media_type=content_type,
         headers={
             # Multiple Content-Disposition formats for maximum compatibility
-            'Content-Disposition': f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}',
+            'Content-Disposition': f'attachment; filename="{safe_filename}"; filename*=UTF-8\'\'{encoded_filename}',
             'Content-Type': content_type,
             'Content-Length': str(file_size),
             
@@ -813,7 +850,7 @@ async def attendance_login(request: Request, username: str, password: str) -> JS
                 domain=None,  # Prevents subdomain mismatch issues
                 secure=True,  # Always secure for HTTPS (Render deployment)
                 httponly=True,  # Security: Prevent XSS attacks
-                samesite="none"  # Required for cross-site cookies with Secure=True
+                samesite="lax"  # Safer default for same-site app flows
             )
             
             return response
@@ -850,11 +887,7 @@ async def get_attendance(request: Request, session_token: str = None) -> JSONRes
     Android Fix: Accepts session_token from query param OR cookie
     """
     try:
-        # ANDROID FIX: Try cookie if query param is missing or empty
-        if not session_token or session_token.strip() == "":
-            session_token = request.cookies.get("session_token")
-            if session_token:
-                logger.info("Using session token from cookie (Android fallback)")
+        session_token = _resolve_session_token(request, session_token)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -863,7 +896,7 @@ async def get_attendance(request: Request, session_token: str = None) -> JSONRes
             }, status_code=401)
         
         client_ip = get_real_client_ip(request)
-        logger.info("Fetching attendance for session token: %s from IP: %s", session_token[:20], client_ip)
+        logger.info("Fetching attendance for authenticated session from IP: %s", client_ip)
         result = await attendance_service.get_attendance(session_token)
         logger.info("Attendance result: success=%s, error=%s", result.get('success'), result.get('error'))
         
@@ -895,11 +928,7 @@ async def get_profile(request: Request, session_token: str = None) -> JSONRespon
     Android Fix: Accepts session_token from query param OR cookie
     """
     try:
-        # ANDROID FIX: Try cookie if query param is missing or empty
-        if not session_token or session_token.strip() == "":
-            session_token = request.cookies.get("session_token")
-            if session_token:
-                logger.info("Using session token from cookie (Android fallback)")
+        session_token = _resolve_session_token(request, session_token)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -941,11 +970,7 @@ async def get_results(request: Request, session_token: str = None) -> JSONRespon
     Android Fix: Accepts session_token from query param OR cookie
     """
     try:
-        # ANDROID FIX: Try cookie if query param is missing or empty
-        if not session_token or session_token.strip() == "":
-            session_token = request.cookies.get("session_token")
-            if session_token:
-                logger.info("Using session token from cookie (Android fallback)")
+        session_token = _resolve_session_token(request, session_token)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -954,7 +979,7 @@ async def get_results(request: Request, session_token: str = None) -> JSONRespon
             }, status_code=401)
         
         client_ip = get_real_client_ip(request)
-        logger.info("Fetching results for session token: %s from IP: %s", session_token[:20], client_ip)
+        logger.info("Fetching results for authenticated session from IP: %s", client_ip)
         
         # Use attendance service's session manager to validate session
         result = await results_service.get_results(session_token, attendance_service.session_manager)
@@ -993,11 +1018,7 @@ async def get_official_results(request: Request, session_token: str = None) -> J
     Android Fix: Accepts session_token from query param OR cookie
     """
     try:
-        # ANDROID FIX: Try cookie if query param is missing or empty
-        if not session_token or session_token.strip() == "":
-            session_token = request.cookies.get("session_token")
-            if session_token:
-                logger.info("Using session token from cookie (Android fallback)")
+        session_token = _resolve_session_token(request, session_token)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -1006,7 +1027,7 @@ async def get_official_results(request: Request, session_token: str = None) -> J
             }, status_code=401)
         
         client_ip = get_real_client_ip(request)
-        logger.info("Fetching official results for session token: %s from IP: %s", session_token[:20], client_ip)
+        logger.info("Fetching official results for authenticated session from IP: %s", client_ip)
         
         # Validate session using attendance service's session manager
         session = attendance_service.session_manager.get_session(session_token)
@@ -1904,7 +1925,7 @@ async def get_official_results(request: Request, session_token: str = None) -> J
 # ADMIN SOC (Security Operations Center)
 # ============================================
 
-SECRET_ADMIN_KEY = os.getenv("ADMIN_KEY", "change-this-secret-key")
+SECRET_ADMIN_KEY = ADMIN_SECRET_KEY
 
 @app.get("/admin-portal")
 async def admin_portal(admin_key: str = None) -> HTMLResponse:
@@ -1914,7 +1935,7 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
     Hidden Admin Dashboard for security monitoring and IP management
     Protected by SECRET_ADMIN_KEY
     """
-    if admin_key != SECRET_ADMIN_KEY:
+    if not _is_valid_admin_key(admin_key):
         return HTMLResponse(
             content="""
             <!DOCTYPE html>
@@ -3009,7 +3030,7 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
 @app.post("/admin-portal/block")
 async def block_ip_endpoint(admin_key: str, ip: str) -> JSONResponse:
     """Block an IP address"""
-    if admin_key != SECRET_ADMIN_KEY:
+    if not _is_valid_admin_key(admin_key):
         return JSONResponse({"success": False, "error": "Unauthorized"}, status_code=401)
     
     try:
@@ -3024,7 +3045,7 @@ async def block_ip_endpoint(admin_key: str, ip: str) -> JSONResponse:
 @app.post("/admin-portal/unblock")
 async def unblock_ip_endpoint(admin_key: str, ip: str) -> JSONResponse:
     """Unblock an IP address"""
-    if admin_key != SECRET_ADMIN_KEY:
+    if not _is_valid_admin_key(admin_key):
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     try:
@@ -3039,7 +3060,7 @@ async def unblock_ip_endpoint(admin_key: str, ip: str) -> JSONResponse:
 @app.post("/admin-portal/clear-activity")
 async def clear_activity_endpoint(admin_key: str) -> JSONResponse:
     """Clear all activity logs and unblock ALL IPs"""
-    if admin_key != SECRET_ADMIN_KEY:
+    if not _is_valid_admin_key(admin_key):
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     try:
