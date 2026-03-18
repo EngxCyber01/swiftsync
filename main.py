@@ -11,11 +11,8 @@ from bs4 import BeautifulSoup
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, Header, HTTPException
-                gap: 0.85rem;
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-                font-size: 1.45rem;
-                line-height: 1.1;
 
 from auth import AuthClient, AuthConfig, AuthError
 from sync import DOWNLOAD_DIR, SYNC_INTERVAL_SECONDS, sync_once, _was_notified, _mark_notified, _get_semester_from_subject
@@ -26,16 +23,10 @@ import database as db
 from telegram_notifier import notify_new_lecture, notify_multiple_lectures
 
 load_dotenv(override=True)
-                margin: 0.15rem 0;
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-                padding: 1.25rem 1.75rem;
 # Get base URL from environment or detect from request
 BASE_URL = os.getenv("BASE_URL", "https://swiftsync-013r.onrender.com")
-                display: grid;
-                grid-template-columns: 1fr auto;
-                align-items: center;
-                column-gap: 1rem;
 _gemini_key = os.getenv("GEMINI_API_KEY")
 _openai_key = os.getenv("OPENAI_API_KEY")
 SECRET_ADMIN_KEY = os.getenv("SECRET_ADMIN_KEY", "emadCyberSoft4SOC")
@@ -50,19 +41,12 @@ else:
 # Log admin key for debugging
 if SECRET_ADMIN_KEY:
     logger.info("✓ Admin SOC key configured (hidden for security)")
-                min-width: 0;
-                padding-right: 0.5rem;
-                word-break: break-word;
 else:
     logger.warning("⚠ No admin key found, using default")
-                font-size: 1.3rem;
-                flex-shrink: 0;
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
     # Startup
-                gap: 1.25rem;
-                padding: 1.25rem 1.6rem;
     # asyncio.create_task(sync_worker())
     
     yield
@@ -86,22 +70,15 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins for PWA
     allow_credentials=True,
-                padding-right: 0.5rem;
     allow_methods=["*"],
     allow_headers=["*"],
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Ensure the lectures_storage directory exists before mounting
-                gap: 0.75rem;
 app.mount("/files", StaticFiles(directory=DOWNLOAD_DIR, html=False), name="files")
-
-                color: var(--text-tertiary);
-                margin-right: 0.35rem;
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
-                width: 36px;
-                height: 36px;
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon() -> FileResponse:
@@ -111,8 +88,6 @@ async def favicon() -> FileResponse:
         return FileResponse(favicon_path)
     raise HTTPException(status_code=404, detail="Favicon not found")
 
-
-                justify-self: end;
 def get_real_client_ip(request: Request) -> str:
     """
     Get the real client IP address from request, handling all proxy headers.
