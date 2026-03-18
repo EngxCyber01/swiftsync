@@ -2,13 +2,16 @@
 Test script to see what the attendance HTML contains
 """
 import sys
+import os
 from auth import AuthClient, AuthConfig
 import requests
 
 # Login first
 config = AuthConfig()
 config.username = "B02052429"
-config.password = "@12345"
+config.password = os.getenv("PORTAL_PASSWORD", "")
+if not config.password:
+    raise RuntimeError("Set PORTAL_PASSWORD before running this script.")
 
 try:
     client = AuthClient(config)

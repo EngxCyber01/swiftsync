@@ -139,7 +139,7 @@ class AuthClient:
                                callback_response.url, callback_response.status_code)
                     logger.info("Cookies after callback: %d", len(session.cookies))
                     for cookie in session.cookies:
-                        logger.info("  Cookie: %s = %s (domain=%s)", cookie.name, cookie.value[:20], cookie.domain)
+                        logger.info("  Cookie present: %s (domain=%s)", cookie.name, cookie.domain)
             except AuthError as e:
                 logger.warning("No OIDC form found: %s", e)
                 raise  # Re-raise auth errors

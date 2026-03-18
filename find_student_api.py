@@ -1,13 +1,16 @@
 """
 Fetch the home page and search for GetCurrentStudentInfo to find the real API endpoint
 """
+import os
 from auth import AuthClient, AuthConfig
 from bs4 import BeautifulSoup
 import re
 
 config = AuthConfig()
 config.username = "B02052429"  
-config.password = "@12345"
+config.password = os.getenv("PORTAL_PASSWORD", "")
+if not config.password:
+    raise RuntimeError("Set PORTAL_PASSWORD before running this script.")
 
 client = AuthClient(config)
 session = client.login()

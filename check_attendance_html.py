@@ -1,4 +1,5 @@
 """Check if attendance HTML contains student name"""
+import os
 import requests
 from bs4 import BeautifulSoup
 from auth import AuthClient, AuthConfig
@@ -6,7 +7,9 @@ from auth import AuthClient, AuthConfig
 # Login
 config = AuthConfig()
 config.username = "B02052437"
-config.password = "Arabicx2345@"
+config.password = os.getenv("PORTAL_PASSWORD", "")
+if not config.password:
+    raise RuntimeError("Set PORTAL_PASSWORD before running this script.")
 client = AuthClient(config)
 client.login()
 

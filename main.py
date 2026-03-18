@@ -136,19 +136,27 @@ def get_real_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-ALLOW_QUERY_SESSION_TOKEN = os.getenv("ALLOW_QUERY_SESSION_TOKEN", "true").strip().lower() in {"1", "true", "yes"}
 RATE_LIMIT_SYNC_PER_MINUTE = int(os.getenv("RATE_LIMIT_SYNC_PER_MINUTE", "6"))
 RATE_LIMIT_SUMMARY_PER_MINUTE = int(os.getenv("RATE_LIMIT_SUMMARY_PER_MINUTE", "30"))
 _rate_limiter_store = {}
 
 
-def _resolve_session_token(request: Request, query_session_token: str = None) -> str:
-    """Prefer HttpOnly cookie; query token remains optional for backward compatibility."""
+def _resolve_session_token(request: Request) -> str:
+    """Resolve session token from secure channels only (cookie or auth headers)."""
     cookie_token = request.cookies.get("session_token")
     if cookie_token and cookie_token.strip():
         return cookie_token.strip()
-    if ALLOW_QUERY_SESSION_TOKEN and query_session_token and query_session_token.strip():
-        return query_session_token.strip()
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        bearer_token = auth_header[7:].strip()
+        if bearer_token:
+            return bearer_token
+
+    header_token = request.headers.get("X-Session-Token", "")
+    if header_token and header_token.strip():
+        return header_token.strip()
+
     return ""
 
 
@@ -835,7 +843,7 @@ async def summarize_subject(request: Request, subject: str) -> JSONResponse:
 # ========================================
 
 @app.post("/api/attendance/login")
-async def attendance_login(request: Request, username: str, password: str) -> JSONResponse:
+async def attendance_login(request: Request) -> JSONResponse:
     """
     Authenticate user for attendance access
     Creates a secure session token
@@ -845,7 +853,17 @@ async def attendance_login(request: Request, username: str, password: str) -> JS
     - SameSite=Lax works across all browsers while maintaining security
     - Cookie persists across page refreshes and browser restarts
     """
+    username = ""
     try:
+        payload = {}
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        username = str(payload.get("username", "")).strip()
+        password = str(payload.get("password", ""))
+
         # Get real client IP
         client_ip = get_real_client_ip(request)
         user_agent = request.headers.get("User-Agent", "Unknown")
@@ -874,7 +892,6 @@ async def attendance_login(request: Request, username: str, password: str) -> JS
             # Create response with session data
             response = JSONResponse({
                 "success": True,
-                "session_token": result['session_token'],
                 "student_id": result['student_id'],
                 "username": result['username']
             })
@@ -918,15 +935,15 @@ async def attendance_login(request: Request, username: str, password: str) -> JS
 
 
 @app.get("/api/attendance/data")
-async def get_attendance(request: Request, session_token: str = None) -> JSONResponse:
+async def get_attendance(request: Request) -> JSONResponse:
     """
     Fetch attendance data for authenticated user
     Requires valid session token from login
     
-    Android Fix: Accepts session_token from query param OR cookie
+    Android Fix: Uses HttpOnly cookie for session persistence
     """
     try:
-        session_token = _resolve_session_token(request, session_token)
+        session_token = _resolve_session_token(request)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -960,14 +977,14 @@ async def get_attendance(request: Request, session_token: str = None) -> JSONRes
 
 
 @app.get("/api/attendance/profile")
-async def get_profile(request: Request, session_token: str = None) -> JSONResponse:
+async def get_profile(request: Request) -> JSONResponse:
     """
     Fetch student profile (name)
     
-    Android Fix: Accepts session_token from query param OR cookie
+    Android Fix: Uses HttpOnly cookie for session persistence
     """
     try:
-        session_token = _resolve_session_token(request, session_token)
+        session_token = _resolve_session_token(request)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -1000,16 +1017,16 @@ async def get_profile(request: Request, session_token: str = None) -> JSONRespon
 
 
 @app.get("/api/results/data")
-async def get_results(request: Request, session_token: str = None) -> JSONResponse:
+async def get_results(request: Request) -> JSONResponse:
     """
     Fetch results data for authenticated user
     Uses notification API as source for results
     Requires valid session token from attendance login
     
-    Android Fix: Accepts session_token from query param OR cookie
+    Android Fix: Uses HttpOnly cookie for session persistence
     """
     try:
-        session_token = _resolve_session_token(request, session_token)
+        session_token = _resolve_session_token(request)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -1047,17 +1064,17 @@ async def get_results(request: Request, session_token: str = None) -> JSONRespon
 
 
 @app.get("/api/official-results/data")
-async def get_official_results(request: Request, session_token: str = None) -> JSONResponse:
+async def get_official_results(request: Request) -> JSONResponse:
     """
     Fetch official results from StudentResult endpoint for authenticated user
     Uses official StudentResult/List API endpoint
     Requires valid session token from attendance login
     
     Security: Only returns results for the authenticated student's ID
-    Android Fix: Accepts session_token from query param OR cookie
+    Android Fix: Uses HttpOnly cookie for session persistence
     """
     try:
-        session_token = _resolve_session_token(request, session_token)
+        session_token = _resolve_session_token(request)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -1968,12 +1985,12 @@ SECRET_ADMIN_KEY = ADMIN_SECRET_KEY
 
 @app.get("/admin-portal")
 async def admin_portal(admin_key: str = None) -> HTMLResponse:
-    # TODO: Implement admin portal
-    return HTMLResponse("<h1>Admin Portal</h1>")
     """
     Hidden Admin Dashboard for security monitoring and IP management
     Protected by SECRET_ADMIN_KEY
     """
+    logo_version = "2026-03-18"
+
     if not _is_valid_admin_key(admin_key):
         return HTMLResponse(
             content="""
@@ -3138,18 +3155,14 @@ async def clear_activity_endpoint(admin_key: str) -> JSONResponse:
 
 
 @app.get("/api/attendance/details")
-async def get_absence_details(request: Request, session_token: str = None, student_class_id: str = None, class_id: str = None) -> JSONResponse:
+async def get_absence_details(request: Request, student_class_id: str = None, class_id: str = None) -> JSONResponse:
     """
     Fetch absence details (dates/times) for specific module
     
-    Android Fix: Accepts session_token from query param OR cookie
+    Android Fix: Uses HttpOnly cookie for session persistence
     """
     try:
-        # ANDROID FIX: Try cookie if query param is missing or empty
-        if not session_token or session_token.strip() == "":
-            session_token = request.cookies.get("session_token")
-            if session_token:
-                logger.info("Using session token from cookie (Android fallback)")
+        session_token = _resolve_session_token(request)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -3186,18 +3199,14 @@ async def get_absence_details(request: Request, session_token: str = None, stude
 
 
 @app.post("/api/attendance/logout")
-async def attendance_logout(request: Request, session_token: str = None) -> JSONResponse:
+async def attendance_logout(request: Request) -> JSONResponse:
     """
     Logout user and invalidate session
     
-    Android Fix: Accepts session_token from body/query OR cookie, and clears cookie
+    Android Fix: Uses HttpOnly cookie session and clears cookie
     """
     try:
-        # ANDROID FIX: Try cookie if body/query param is missing or empty
-        if not session_token or session_token.strip() == "":
-            session_token = request.cookies.get("session_token")
-            if session_token:
-                logger.info("Using session token from cookie for logout (Android fallback)")
+        session_token = _resolve_session_token(request)
         
         if not session_token or session_token.strip() == "":
             return JSONResponse({
@@ -6016,7 +6025,7 @@ async def dashboard() -> HTMLResponse:
             }};
             
             // Attendance variables - Use safe storage
-            var attendanceSessionToken = safeStorage.getItem('attendance_session_token') || null;
+            var attendanceSessionToken = safeStorage.getItem('attendance_session_active') ? 'cookie-session' : null;
             var attendanceUsername = safeStorage.getItem('attendance_username') || null;
             var attendanceRefreshInterval = null;
             var privateDataBootstrapped = false;
@@ -7072,7 +7081,7 @@ async def dashboard() -> HTMLResponse:
                     // Purge persisted private caches for this user
                     purgePersistedPrivateCaches(getPrivateOwnerKey());
                     attendanceSessionToken = null;
-                    safeStorage.removeItem('attendance_session_token');
+                    safeStorage.removeItem('attendance_session_active');
                     safeStorage.removeItem('attendance_session_timestamp');
                 }}
                 
@@ -7169,13 +7178,16 @@ async def dashboard() -> HTMLResponse:
                 submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Authenticating...</span>';
                 
                 try {{
-                    var result = await apiFetchJson(`/api/attendance/login?username=${{encodeURIComponent(username)}}&password=${{encodeURIComponent(password)}}`, {{ method: 'POST' }}, 1, 25000);
+                    var result = await apiFetchJson('/api/attendance/login', {{
+                        method: 'POST',
+                        body: JSON.stringify({{ username: username, password: password }})
+                    }}, 1, 25000);
                     
                     if (result.success) {{
                         // Save session token
-                        attendanceSessionToken = result.session_token;
+                        attendanceSessionToken = 'cookie-session';
                         attendanceUsername = result.username;
-                        safeStorage.setItem('attendance_session_token', attendanceSessionToken);
+                        safeStorage.setItem('attendance_session_active', '1');
                         safeStorage.setItem('attendance_username', attendanceUsername);
 
                         // New authenticated identity: scope caches to this user
@@ -7484,7 +7496,7 @@ async def dashboard() -> HTMLResponse:
                     let loadedSuccessfully = false;
                     try {{
                         // Fetch attendance data first
-                        const attendanceResult = await apiFetchJson(`/api/attendance/data?session_token=${{encodeURIComponent(requestToken)}}`, {{}}, 2, 12000);
+                        const attendanceResult = await apiFetchJson('/api/attendance/data', {{}}, 2, 12000);
                     
                         // If user logged out / switched user while request was in-flight, ignore results
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
@@ -7504,7 +7516,7 @@ async def dashboard() -> HTMLResponse:
                         }} else {{
                             // Try to fetch from profile API
                             try {{
-                                const profileResult = await apiFetchJson(`/api/attendance/profile?session_token=${{encodeURIComponent(attendanceSessionToken)}}`, {{}}, 1, 9000);
+                                const profileResult = await apiFetchJson('/api/attendance/profile', {{}}, 1, 9000);
                                 
                                 if (profileResult.success) {{
                                     const firstName = profileResult.first_name || '';
@@ -7577,7 +7589,7 @@ async def dashboard() -> HTMLResponse:
                 
                 if (attendanceSessionToken) {{
                     try {{
-                        await fetch(`/api/attendance/logout?session_token=${{encodeURIComponent(attendanceSessionToken)}}`, {{
+                        await fetch('/api/attendance/logout', {{
                             method: 'POST'
                         }});
                     }} catch (error) {{
@@ -7588,7 +7600,7 @@ async def dashboard() -> HTMLResponse:
                 // Clear session and saved credentials
                 attendanceSessionToken = null;
                 attendanceUsername = null;
-                safeStorage.removeItem('attendance_session_token');
+                safeStorage.removeItem('attendance_session_active');
                 safeStorage.removeItem('attendance_username');
                 safeStorage.removeItem('attendance_credentials');
                 safeStorage.removeItem('attendance_saved_username');
@@ -7652,7 +7664,7 @@ async def dashboard() -> HTMLResponse:
                 inFlightResultAlerts = (async () => {{
                     let loadedSuccessfully = false;
                     try {{
-                        const result = await apiFetchJson(`/api/results/data?session_token=${{encodeURIComponent(requestToken)}}`, {{}}, 2, 12000);
+                        const result = await apiFetchJson('/api/results/data', {{}}, 2, 12000);
                     
                         // If user logged out / switched user while request was in-flight, ignore results
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
@@ -7980,7 +7992,7 @@ async def dashboard() -> HTMLResponse:
                 inFlightOfficialResults = (async () => {{
                     let loadedSuccessfully = false;
                     try {{
-                        const result = await apiFetchJson(`/api/official-results/data?session_token=${{encodeURIComponent(requestToken)}}`, {{}}, 2, 15000);
+                        const result = await apiFetchJson('/api/official-results/data', {{}}, 2, 15000);
                     
                         // If user logged out / switched user while request was in-flight, ignore results
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
@@ -8369,7 +8381,7 @@ async def dashboard() -> HTMLResponse:
                     console.log('⚠️ Session expired, clearing...');
                     // Clear expired session
                     attendanceSessionToken = null;
-                    safeStorage.removeItem('attendance_session_token');
+                    safeStorage.removeItem('attendance_session_active');
                     safeStorage.removeItem('attendance_username');
                     safeStorage.removeItem('attendance_session_timestamp');
                 }} else {{

@@ -1,4 +1,5 @@
 ﻿"""Test extracting name from attendance page"""
+import os
 import requests
 from bs4 import BeautifulSoup
 from auth import AuthClient, AuthConfig
@@ -7,7 +8,9 @@ import re
 # Login
 config = AuthConfig()
 config.username = "B02052324"
-config.password = "your_portal_password_here"
+config.password = os.getenv("PORTAL_PASSWORD", "")
+if not config.password:
+    raise RuntimeError("Set PORTAL_PASSWORD before running this script.")
 client = AuthClient(config)
 client.login()
 

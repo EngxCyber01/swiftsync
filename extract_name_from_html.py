@@ -2,13 +2,16 @@
 Extract student name from the actual attendance HTML
 Run this for B02052429 to see what we get
 """
+import os
 from auth import AuthClient, AuthConfig
 from bs4 import BeautifulSoup
 
 # Test with B02052429
 config = AuthConfig()
 config.username = "B02052429"
-config.password = "@12345"
+config.password = os.getenv("PORTAL_PASSWORD", "")
+if not config.password:
+    raise RuntimeError("Set PORTAL_PASSWORD before running this script.")
 
 client = AuthClient(config)
 session = client.login()
