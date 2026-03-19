@@ -7522,19 +7522,14 @@ async def dashboard() -> HTMLResponse:
             // ===================================
             
             async function checkAttendanceSession() {{
-                // Rebuild cookie-backed session context after hard refresh when user opted in.
+                // Cookie-first restore: rely on server-side session cookie as source of truth.
                 if (!attendanceSessionToken) {{
-                    var rememberEnabled = safeStorage.getItem('attendance_remember_enabled') === 'true';
-                    var sessionActive = safeStorage.getItem('attendance_session_active') === 'true';
-
-                    if (rememberEnabled && sessionActive && !isSessionExpired()) {{
-                        attendanceSessionToken = 'cookie-session';
-                        attendanceUsername = safeStorage.getItem('attendance_username') || safeStorage.getItem('attendance_saved_username');
-                    }}
+                    attendanceSessionToken = 'cookie-session';
+                    attendanceUsername = safeStorage.getItem('attendance_username') || safeStorage.getItem('attendance_saved_username');
                 }}
 
-                // Check if session is expired
-                if (attendanceSessionToken && isSessionExpired()) {{
+                // For token-based fallback sessions, keep client-side expiry check.
+                if (attendanceSessionToken && attendanceSessionToken !== 'cookie-session' && isSessionExpired()) {{
                     console.log('Session expired, clearing...');
                     // Clear expired session
                     // Purge persisted private caches for this user
@@ -7580,6 +7575,11 @@ async def dashboard() -> HTMLResponse:
 
                             // Product requirement: always open Attendance on session restore.
                             switchPrivateSection('attendance');
+                        }} else {{
+                            // Cookie/session restore failed on server; return to explicit login state.
+                            attendanceSessionToken = null;
+                            safeStorage.removeItem('attendance_session_active');
+                            safeStorage.removeItem('attendance_session_timestamp');
                         }}
                     }}
 
