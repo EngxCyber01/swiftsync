@@ -6641,6 +6641,14 @@ async def dashboard() -> HTMLResponse:
                 }}
 
                 inFlightPrivateBootstrap = (async () => {{
+                    // Start results fetches immediately so they can overlap with attendance loading.
+                    const resultAlertsPromise = (forceRefresh || !cachedResultAlerts)
+                        ? fetchResultAlerts(true).catch(() => false)
+                        : Promise.resolve(true);
+                    const officialResultsPromise = (forceRefresh || !cachedOfficialResults)
+                        ? fetchOfficialResults(true).catch(() => false)
+                        : Promise.resolve(true);
+
                     // 1) Prioritize attendance readiness for login UX.
                     let attendanceReady = false;
                     try {{
@@ -6660,14 +6668,8 @@ async def dashboard() -> HTMLResponse:
                     }}
 
                     // 2) Kick off results fetches in background; do not block login reveal.
-                    const resultAlertsReady = !!cachedResultAlerts;
-                    const officialResultsReady = !!cachedOfficialResults;
-                    if (forceRefresh || !cachedResultAlerts) {{
-                        fetchResultAlerts(true).catch(() => false);
-                    }}
-                    if (forceRefresh || !cachedOfficialResults) {{
-                        fetchOfficialResults(true).catch(() => false);
-                    }}
+                    const resultAlertsReady = (await resultAlertsPromise) || !!cachedResultAlerts;
+                    const officialResultsReady = (await officialResultsPromise) || !!cachedOfficialResults;
 
                     return {{ attendanceReady, resultAlertsReady, officialResultsReady }};
                 }})().finally(() => {{
@@ -7452,10 +7454,25 @@ async def dashboard() -> HTMLResponse:
                     document.getElementById('privateTab').classList.add('active');
                     document.getElementById('privateZone').classList.add('active');
                     safeStorage.setItem('lastActiveZone', 'private');
+
+                    // Avoid flashing the login form while session restore is in progress.
+                    showPrivateRestoreState();
                     
                     // Check if user has a saved session
                     checkAttendanceSession();
                 }}
+            }}
+
+            function showPrivateRestoreState() {{
+                document.getElementById('privateLoginArea').style.display = 'none';
+                document.getElementById('privateDataArea').style.display = 'block';
+                switchPrivateSection('attendance');
+                document.getElementById('attendanceContent').innerHTML = `
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p style="color: var(--text-secondary)">Restoring your secure session...</p>
+                    </div>
+                `;
             }}
             
             // Switch between Attendance, Result Alerts, and Official Results within Private Mode
@@ -7619,7 +7636,7 @@ async def dashboard() -> HTMLResponse:
                 var submitBtn = document.getElementById('loginSubmitBtn');
                 
                 if (!username || !password) {{
-                    alert('Please enter both username and password');
+                    showNotification('Please enter both username and password.', 'error');
                     return;
                 }}
                 
@@ -7697,7 +7714,7 @@ async def dashboard() -> HTMLResponse:
                         
                         console.log('✅ Login successful - session valid for 7 days');
                     }} else {{
-                        alert(`Login failed: ${{result.error}}`);
+                        showNotification(`Login failed: ${{result.error}}`, 'error');
 
                         // Safety: ensure stale private caches aren't kept after failed login
                         clearPrivateCaches();
@@ -7709,7 +7726,7 @@ async def dashboard() -> HTMLResponse:
                         submitBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i><span>Login Securely</span>';
                     }}
                 }} catch (error) {{
-                    alert(`Login error: ${{error.message}}`);
+                    showNotification(`Login error: ${{error.message}}`, 'error');
 
                     // Safety: ensure stale private caches aren't kept after failed login
                     clearPrivateCaches();
@@ -7991,7 +8008,7 @@ async def dashboard() -> HTMLResponse:
                         // Session expired or error
                         if (attendanceResult.error && attendanceResult.error.toLowerCase().includes('expired')) {{
                             logoutAttendance(true);
-                            alert('Session expired. Please login again.');
+                            showNotification('Session expired. Please login again.', 'error');
                         }} else {{
                             document.getElementById('attendanceContent').innerHTML = `
                                 <div class="empty-state">
@@ -8143,7 +8160,7 @@ async def dashboard() -> HTMLResponse:
                         // Session expired or error
                         if (result.error && result.error.toLowerCase().includes('expired')) {{
                             logoutAttendance(true);
-                            alert('Session expired. Please login again.');
+                            showNotification('Session expired. Please login again.', 'error');
                         }} else {{
                             document.getElementById('resultsContent').innerHTML = `
                                 <div class="empty-state">
@@ -8430,7 +8447,7 @@ async def dashboard() -> HTMLResponse:
                         // Session expired or error
                         if (result.error && result.error.toLowerCase().includes('expired')) {{
                             logoutAttendance(true);
-                            alert('Session expired. Please login again.');
+                            showNotification('Session expired. Please login again.', 'error');
                         }} else {{
                             // Keep showing last cached results if we have any,
                             // and only replace the UI with an error screen when
