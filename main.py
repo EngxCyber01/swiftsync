@@ -956,7 +956,9 @@ async def attendance_login(request: Request) -> JSONResponse:
             response = JSONResponse({
                 "success": True,
                 "student_id": result['student_id'],
-                "username": result['username']
+                "username": result['username'],
+                # Fallback token for clients where cookie persistence is delayed/restricted.
+                "session_token": result.get('session_token', '')
             })
 
             # Browsers reject Secure cookies on http://localhost.
@@ -6413,13 +6415,22 @@ async def dashboard() -> HTMLResponse:
                     const controller = new AbortController();
                     const timer = setTimeout(() => controller.abort(), timeoutMs);
                     try {{
+                        const requestHeaders = {{
+                            'Content-Type': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest',
+                            ...(options.headers || {{}})
+                        }};
+
+                        // Mobile fallback: when cookie persistence is delayed/restricted,
+                        // send token via header so private APIs still authenticate.
+                        if (attendanceSessionToken && attendanceSessionToken !== 'cookie-session') {{
+                            requestHeaders['Authorization'] = `Bearer ${{attendanceSessionToken}}`;
+                            requestHeaders['X-Session-Token'] = attendanceSessionToken;
+                        }}
+
                         const response = await fetch(url, {{
                             method: options.method || 'GET',
-                            headers: {{
-                                'Content-Type': 'application/json',
-                                'X-Requested-With': 'XMLHttpRequest',
-                                ...(options.headers || {{}})
-                            }},
+                            headers: requestHeaders,
                             body: options.body,
                             credentials: 'same-origin',
                             cache: 'no-store',
@@ -6491,23 +6502,33 @@ async def dashboard() -> HTMLResponse:
                 }}
 
                 inFlightPrivateBootstrap = (async () => {{
-                    const attendancePromise = loadAttendanceData(false, deferUiReveal);
-                    const resultAlertsPromise = (forceRefresh || !cachedResultAlerts)
-                        ? fetchResultAlerts(true)
-                        : Promise.resolve(true);
-                    const officialResultsPromise = (forceRefresh || !cachedOfficialResults)
-                        ? fetchOfficialResults(true)
-                        : Promise.resolve(true);
+                    // 1) Prioritize attendance readiness for login UX.
+                    let attendanceReady = false;
+                    try {{
+                        attendanceReady = await loadAttendanceData(false, deferUiReveal);
+                    }} catch (_) {{
+                        attendanceReady = false;
+                    }}
 
-                    const [attendanceState, resultAlertsState, officialResultsState] = await Promise.allSettled([
-                        attendancePromise,
-                        resultAlertsPromise,
-                        officialResultsPromise
-                    ]);
+                    // One short retry for flaky mobile networks / cookie propagation delay.
+                    if (!attendanceReady) {{
+                        await new Promise(r => setTimeout(r, 700));
+                        try {{
+                            attendanceReady = await loadAttendanceData(true, deferUiReveal);
+                        }} catch (_) {{
+                            attendanceReady = false;
+                        }}
+                    }}
 
-                    const attendanceReady = attendanceState.status === 'fulfilled' && attendanceState.value === true;
-                    const resultAlertsReady = resultAlertsState.status === 'fulfilled' && resultAlertsState.value === true;
-                    const officialResultsReady = officialResultsState.status === 'fulfilled' && officialResultsState.value === true;
+                    // 2) Kick off results fetches in background; do not block login reveal.
+                    const resultAlertsReady = !!cachedResultAlerts;
+                    const officialResultsReady = !!cachedOfficialResults;
+                    if (forceRefresh || !cachedResultAlerts) {{
+                        fetchResultAlerts(true).catch(() => false);
+                    }}
+                    if (forceRefresh || !cachedOfficialResults) {{
+                        fetchOfficialResults(true).catch(() => false);
+                    }}
 
                     return {{ attendanceReady, resultAlertsReady, officialResultsReady }};
                 }})().finally(() => {{
@@ -7410,7 +7431,7 @@ async def dashboard() -> HTMLResponse:
                     
                     if (result.success) {{
                         // Save session token
-                        attendanceSessionToken = 'cookie-session';
+                        attendanceSessionToken = result.session_token || 'cookie-session';
                         attendanceUsername = result.username;
 
                         // New authenticated identity: scope caches to this user
@@ -7896,7 +7917,7 @@ async def dashboard() -> HTMLResponse:
                 inFlightResultAlerts = (async () => {{
                     let loadedSuccessfully = false;
                     try {{
-                        const result = await apiFetchJson('/api/results/data', {{}}, 2, 12000);
+                        const result = await apiFetchJson('/api/results/data', {{}}, 2, 30000);
                     
                         // If user logged out / switched user while request was in-flight, ignore results
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
@@ -8186,7 +8207,7 @@ async def dashboard() -> HTMLResponse:
                 inFlightOfficialResults = (async () => {{
                     let loadedSuccessfully = false;
                     try {{
-                        const result = await apiFetchJson('/api/official-results/data', {{}}, 2, 15000);
+                        const result = await apiFetchJson('/api/official-results/data', {{}}, 2, 30000);
                     
                         // If user logged out / switched user while request was in-flight, ignore results
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
