@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "https://tempapp-su.awrosoft.com")
 SESSIONS_ENDPOINT = f"{APP_BASE_URL}/University/ClassSession/GetStudentClassSessionsList"
+SESSIONS_ENDPOINTS = [
+    SESSIONS_ENDPOINT,
+    f"{APP_BASE_URL}/University/ClassSession/GetStudentClassSessionList",
+    f"{APP_BASE_URL}/University/ClassSessions/GetStudentClassSessionsList",
+]
 DOWNLOAD_ENDPOINT = f"{APP_BASE_URL}/University/ClassSessionFile/DownloadClassSessionFile"
 
 ROOT = Path(__file__).resolve().parent
@@ -155,22 +160,38 @@ def _extract_ids(timeline: Iterable) -> List[str]:
     return ids
 
 
+def _fetch_sessions_html(session: requests.Session) -> str:
+    """Fetch sessions HTML, trying known endpoint variants to survive portal route changes."""
+    auth_status = None
+    status_details = []
+
+    for endpoint in SESSIONS_ENDPOINTS:
+        logger.info("Fetching class sessions from %s", endpoint)
+        response = session.get(endpoint)
+        status_details.append(f"{endpoint} -> {response.status_code}")
+
+        if response.status_code == 200:
+            logger.info("Using sessions endpoint: %s", endpoint)
+            return response.text
+
+        if response.status_code in (401, 403):
+            auth_status = response.status_code
+
+    if auth_status is not None:
+        raise AuthError(f"Sessions API returned {auth_status}. Session expired or unauthorized.")
+
+    raise RuntimeError(
+        "Sessions API returned non-200 statuses across known endpoints: " + "; ".join(status_details)
+    )
+
+
 def fetch_timeline(session: requests.Session) -> List[str]:
     """Fetch list of file IDs from the sessions HTML page (2025-2026 only)"""
-    logger.info("Fetching class sessions from %s", SESSIONS_ENDPOINT)
-    
-    response = session.get(SESSIONS_ENDPOINT)
-    
-    # Handle authentication failures
-    if response.status_code in (401, 403):
-        raise AuthError(f"Sessions API returned {response.status_code}. Session expired or unauthorized.")
-    
-    if response.status_code != 200:
-        raise RuntimeError(f"Sessions API returned {response.status_code}: {response.text[:200]}")
+    html = _fetch_sessions_html(session)
 
     # The endpoint returns HTML with download links
     # Filter to only include 2025-2026 academic year
-    soup = BeautifulSoup(response.text, 'html.parser')
+    soup = BeautifulSoup(html, 'html.parser')
     file_ids = []
     
     # Find all year sections
@@ -192,17 +213,8 @@ def fetch_timeline(session: requests.Session) -> List[str]:
 
 def fetch_timeline_with_subjects(session: requests.Session) -> dict:
     """Fetch file IDs with their subject information (2025-2026 only)"""
-    logger.info("Fetching class sessions with subjects from %s", SESSIONS_ENDPOINT)
-    
-    response = session.get(SESSIONS_ENDPOINT)
-    
-    if response.status_code in (401, 403):
-        raise AuthError(f"Sessions API returned {response.status_code}. Session expired or unauthorized.")
-    
-    if response.status_code != 200:
-        raise RuntimeError(f"Sessions API returned {response.status_code}: {response.text[:200]}")
-
-    soup = BeautifulSoup(response.text, 'html.parser')
+    html = _fetch_sessions_html(session)
+    soup = BeautifulSoup(html, 'html.parser')
     subjects_data = {}
     
     # Find 2025-2026 year section

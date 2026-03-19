@@ -6,6 +6,7 @@ Saves results to database for persistence
 """
 
 import asyncio
+import os
 import requests
 from bs4 import BeautifulSoup
 from typing import Optional, Dict, Any, List
@@ -28,6 +29,8 @@ class ResultsService:
         f"{BASE_URL}/University/Notifications/GetList",
     ]
     REQUEST_TIMEOUT = 15  # seconds
+    TARGET_ACADEMIC_YEAR_FULL = os.getenv("RESULTS_ACADEMIC_YEAR_FULL", "2025-2026")
+    TARGET_ACADEMIC_YEAR_SHORT = os.getenv("RESULTS_ACADEMIC_YEAR_SHORT", "25-26")
     
     # Keywords that indicate result-related notifications
     RESULT_KEYWORDS = [
@@ -45,6 +48,57 @@ class ResultsService:
     
     def __init__(self):
         pass
+
+    def _normalize_result_key(self, item: Dict[str, Any]) -> str:
+        """Build a stable key used to collapse duplicate rows returned to the UI."""
+        semester_display = str(item.get('semester_display', '') or '').strip().lower()
+        subject = str(item.get('subject', '') or '').strip().lower()
+        exam_type = str(item.get('exam_type', '') or '').strip().lower()
+        score = str(item.get('score', '') or '').strip().lower()
+        # Date can come as ISO or display-like string; keep date-part only to avoid time-zone duplicates.
+        date_raw = str(item.get('date', '') or '').strip()
+        date_norm = date_raw[:10] if len(date_raw) >= 10 else date_raw
+        return f"{semester_display}|{subject}|{exam_type}|{score}|{date_norm}"
+
+    def _dedupe_result_items(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Remove repeated rows while preserving first occurrence order."""
+        seen = set()
+        deduped = []
+        for item in items:
+            key = self._normalize_result_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
+
+    def _belongs_to_target_year(self, semester: str, raw_text: str) -> bool:
+        """Keep only notifications tied to the configured academic year."""
+        combined = f"{semester or ''} {raw_text or ''}".lower()
+        return (
+            self.TARGET_ACADEMIC_YEAR_FULL.lower() in combined
+            or self.TARGET_ACADEMIC_YEAR_SHORT.lower() in combined
+        )
+
+    def _to_semester_display(self, semester: str, raw_text: str) -> Optional[str]:
+        """Map raw semester codes/text to a canonical display label."""
+        combined = f"{semester or ''} {raw_text or ''}".lower()
+
+        # Support portal codes like Software_F_25-26, Software_F25-26, Software_S_25-26, Software_S25-26
+        is_fall = bool(re.search(r'(?:[_\-]f[_\-]?\d{2}-\d{2}|\bfall\b|\b1st\s+semester\b|\bfirst\s+semester\b)', combined))
+        is_spring = bool(re.search(r'(?:[_\-]s[_\-]?\d{2}-\d{2}|\bspring\b|\b2nd\s+semester\b|\bsecond\s+semester\b)', combined))
+
+        if is_fall:
+            return f"{self.TARGET_ACADEMIC_YEAR_FULL} Fall Semester"
+        if is_spring:
+            return f"{self.TARGET_ACADEMIC_YEAR_FULL} Spring Semester"
+        return None
+
+    def _student_notification_id(self, student_id: str, notification_id: str) -> str:
+        """Namespace notification ID per student to avoid cross-student collisions."""
+        sid = (student_id or "").strip()
+        nid = (notification_id or "").strip()
+        return f"{sid}:{nid}" if sid and nid else nid
     
     def _is_result_notification(self, notification_text: str) -> bool:
         """
@@ -151,11 +205,12 @@ class ResultsService:
                 print(f"DEBUG: Found grade: {result['grade']}")
                 break
         
-        # Extract semester/class info from "Software_S_25-26" pattern
-        semester_pattern = r'(Software|Hardware|[A-Za-z]+)_[A-Z]_\d{2}-\d{2}'
-        sem_match = re.search(semester_pattern, text)
+        # Extract semester/class info from portal patterns such as:
+        # Software_S_25-26, Software_F_25-26, Software_S25-26, Software-F25-26
+        semester_pattern = r'([A-Za-z]+)[_\-]([FS])[_\-]?(\d{2}-\d{2})'
+        sem_match = re.search(semester_pattern, parse_text, re.IGNORECASE)
         if sem_match:
-            result['semester'] = sem_match.group(0)
+            result['semester'] = f"{sem_match.group(1)}_{sem_match.group(2).upper()}_{sem_match.group(3)}"
             print(f"DEBUG: Found semester/class: {result['semester']}")
         
         # Try to extract stage/year number
@@ -198,6 +253,125 @@ class ResultsService:
         print(f"DEBUG: Final parsed result: subject={result['subject']}, exam={result['exam_type']}, score={result['score']}, grade={result['grade']}")
         return result
     
+    async def _fetch_official_results_html(self, student_id: str, cookies: Dict) -> Optional[str]:
+        """Fetch official results HTML page"""
+        try:
+            endpoint = f"{self.BASE_URL}/University/StudentResult/List?studentId={student_id}"
+            def fetch():
+                response = requests.get(
+                    endpoint,
+                    cookies=cookies,
+                    timeout=self.REQUEST_TIMEOUT,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Accept": "application/json, text/html, */*",
+                        "Referer": f"{self.BASE_URL}/Home",
+                    }
+                )
+                return response
+            
+            response = await asyncio.to_thread(fetch)
+            if response.status_code == 200:
+                return response.text
+            return None
+        except Exception as e:
+            print(f"DEBUG: Error fetching official results: {e}")
+            return None
+    
+    def _parse_official_results_html(self, html: str, student_id: str) -> List[Dict]:
+        """
+        Parse official results from HTML page
+        Extracts Fall/Spring results that may not be in Notifications API
+        """
+        results = []
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Look for result cards/items in the HTML
+            # Typical structure: headers with semester info, then rows with results
+            cards = soup.find_all('div', {'class': ['card', 'result-card', 'semester-card']})
+            if not cards:
+                # Alternative: look for tables
+                tables = soup.find_all('table')
+                if tables:
+                    for table in tables:
+                        rows = table.find_all('tr')
+                        for row in rows[1:]:  # Skip header
+                            cols = row.find_all('td')
+                            if len(cols) >= 4:
+                                subject = cols[0].text.strip()
+                                exam_type = cols[1].text.strip() if len(cols) > 1 else ''
+                                score = cols[2].text.strip() if len(cols) > 2 else ''
+                                semester = cols[3].text.strip() if len(cols) > 3 else ''
+                                
+                                if subject and score:
+                                    try:
+                                        score_val = float(score.split('/')[0]) if score and '/' in score else float(score) if score else 0
+                                    except:
+                                        score_val = 0
+                                    
+                                    result_item = {
+                                        'subject': subject,
+                                        'exam_type': exam_type,
+                                        'score': score,
+                                        'semester': semester,
+                                        'grade': '',
+                                        'status': 'passed' if score_val >= 50 else 'failed'
+                                    }
+                                    results.append(result_item)
+            
+            return results
+        except Exception as e:
+            print(f"DEBUG: Error parsing official results HTML: {e}")
+            return []
+    
+    async def _save_official_results(self, html: str, student_id: str, cookies: Dict) -> int:
+        """
+        Parse official results HTML and save to database if not already cached
+        Returns count of newly saved results
+        """
+        saved_count = 0
+        try:
+            # Parse HTML (this is custom logic since HTML structure may vary)
+            # For now, we'll extract any result text we can find
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Extract all text content and look for result patterns
+            text_content = soup.get_text()
+            
+            # Look for Fall semester section
+            fall_match = re.search(r'(Fall.*?Semester|result.*?25-26.*?Fall)', text_content, re.IGNORECASE | re.DOTALL)
+            if fall_match:
+                print(f"DEBUG: Found Fall semester section in official results")
+                # Try to extract individual results
+                result_pattern = r'([A-Za-z\s]+)\s+[-–]\s+([\d.]+)\s*(?:/10)?'
+                matches = re.findall(result_pattern, fall_match.group(1))
+                for subject, score in matches:
+                    subject = subject.strip()
+                    if subject and subject not in ['Fall Semester', 'Result', '2025-2026']:
+                        notif_id = f"official_fall_{student_id}_{subject}_{score}"
+                        scoped_id = self._student_notification_id(student_id, notif_id)
+                        
+                        if not result_exists(scoped_id, student_id):
+                            parsed = {
+                                'subject': subject,
+                                'exam_type': 'Final',
+                                'score': score,
+                                'grade': '',
+                                'semester': 'Software_F_25-26',
+                                'raw_text': f'Your result of {subject} - Software_F_25-26 class is {score}',
+                                'status': 'passed',
+                                'exam_date': datetime.now().isoformat()
+                            }
+                            if save_result(student_id, scoped_id, parsed):
+                                saved_count += 1
+                                print(f"DEBUG: Saved official Fall result: {subject}")
+            
+            return saved_count
+        except Exception as e:
+            print(f"DEBUG: Error saving official results: {e}")
+            return 0
+    
     async def get_results(self, session_token: str, session_manager) -> Dict[str, Any]:
         """
         Fetch results from notification API and save to database
@@ -230,15 +404,56 @@ class ResultsService:
         new_results_saved = 0
         
         try:
-            # Fetch ALL pages of notifications with pagination
+            # First, get total page count from dedicated endpoint.
+            pages_count_endpoint = f"{self.BASE_URL}/Notification/GetPagesCount"
+            print(f"DEBUG: Fetching page count from: {pages_count_endpoint}")
+            
+            try:
+                def fetch_page_count():
+                    response = requests.get(
+                        pages_count_endpoint,
+                        cookies=cookies,
+                        timeout=self.REQUEST_TIMEOUT,
+                        headers={
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            "Accept": "application/json, text/html, */*",
+                        }
+                    )
+                    return response
+                
+                page_count_response = await asyncio.to_thread(fetch_page_count)
+                total_pages = 1
+                
+                if page_count_response.status_code == 200:
+                    try:
+                        count_data = page_count_response.json()
+                        if isinstance(count_data, dict):
+                            total_pages = int(
+                                count_data.get(
+                                    'pageCount',
+                                    count_data.get('totalPages', count_data.get('pages', count_data.get('count', 1)))
+                                )
+                            )
+                        else:
+                            total_pages = int(count_data)
+                        if total_pages < 1:
+                            total_pages = 1
+                        print(f"DEBUG: Total pages from GetPagesCount: {total_pages}")
+                    except:
+                        print(f"DEBUG: Could not parse page count, using default 1")
+            except Exception as e:
+                total_pages = 1
+                print(f"DEBUG: Could not fetch page count: {e}, using default 1")
+            
+            # Now fetch ALL pages of notifications with pagination
             all_notifications = []
             page_number = 1
-            page_size = 10  # Default page size from API
+            page_size = 50
             
-            while True:
+            while page_number <= total_pages:
                 # Add pagination parameters to endpoint
                 paginated_endpoint = f"{self.NOTIFICATIONS_ENDPOINT}?PageNumber={page_number}&PageSize={page_size}"
-                print(f"DEBUG: Fetching page {page_number} from: {paginated_endpoint}")
+                print(f"DEBUG: Fetching page {page_number}/{total_pages} from: {paginated_endpoint}")
                 
                 notifications = await self._fetch_notifications(paginated_endpoint, cookies)
                 
@@ -248,25 +463,28 @@ class ResultsService:
                     break
                 
                 print(f"DEBUG: Page {page_number} returned {len(notifications)} notifications")
+                
+                # Log first few notification texts to see what we're getting
+                for idx, notif in enumerate(notifications[:3]):
+                    text = notif.get('text', '')
+                    desc = notif.get('description', '')
+                    print(f"  Notification {idx+1}: text='{text[:60]}...' desc='{desc[:60]}...'")
+                
                 all_notifications.extend(notifications)
                 
-                # If we got less than page_size, we're on the last page
-                if len(notifications) < page_size:
-                    print(f"DEBUG: Last page reached (got {len(notifications)} < {page_size})")
-                    break
-                
                 page_number += 1
-                
-                # Safety limit to prevent infinite loops
-                if page_number > 100:
-                    print(f"DEBUG: Safety limit reached at page 100, stopping")
-                    break
             
-            print(f"DEBUG: Total notifications fetched across {page_number} pages: {len(all_notifications)}")
+            fetched_pages = page_number - 1 if page_number > 1 else 1
+            print(f"DEBUG: Total notifications fetched across {fetched_pages} pages: {len(all_notifications)}")
+            print(f"DEBUG: Analyzing notifications for result keywords...")
+
             
             # Process all fetched notifications
             if all_notifications:
                 print(f"DEBUG: Processing {len(all_notifications)} notifications")
+                result_count = 0
+                non_result_count = 0
+                
                 # Filter and save result-related notifications
                 for notification in all_notifications:
                     text = notification.get('text', '')
@@ -280,84 +498,118 @@ class ResultsService:
                     # Check if result-related (check both text and description)
                     check_text = f"{text} {description}"
                     print(f"DEBUG: Checking notification {notification_id}: '{text[:50]}...'")
+                    
                     if self._is_result_notification(check_text):
-                        print(f"DEBUG: ✓ Notification {notification_id} is result-related")
+                        result_count += 1
+                        print(f"  ✓ IS result-related (keyword match)")
+                        
                         # Check if already saved for THIS student (avoid duplicates per student)
-                        if not result_exists(notification_id, student_id):
-                            print(f"DEBUG: Notification {notification_id} is new for student {student_id}, parsing and saving...")
+                        scoped_notification_id = self._student_notification_id(student_id, notification_id)
+                        if not result_exists(scoped_notification_id, student_id):
+                            print(f"  → New for student {student_id}, parsing and saving...")
                             # Parse the notification using description field
                             parsed = self._parse_notification_text(text, description)
                             parsed['raw_text'] = check_text
                             parsed['exam_date'] = date
                             
-                            # Only save if semester is valid (not empty/unknown)
-                            if parsed.get('semester') and parsed['semester'].strip():
-                                # Save to database
-                                if save_result(student_id, notification_id, parsed):
-                                    new_results_saved += 1
-                                    print(f"DEBUG: ✓ Saved result {new_results_saved}: {parsed.get('subject', 'Unknown')} - {parsed.get('exam_type', 'Unknown')}")
-                                else:
-                                    print(f"DEBUG: ✗ Failed to save notification {notification_id}")
+                            # Detect semester
+                            is_fall = bool(re.search(r'(?:[_\-]f[_\-]?\d{2}-\d{2}|\bfall\b|\b1st\s+semester\b|\bfirst\s+semester\b)', check_text.lower()))
+                            is_spring = bool(re.search(r'(?:[_\-]s[_\-]?\d{2}-\d{2}|\bspring\b|\b2nd\s+semester\b|\bsecond\s+semester\b)', check_text.lower()))
+                            sem_label = 'FALL' if is_fall else ('SPRING' if is_spring else 'UNKNOWN')
+                            print(f"    Semester detected: {sem_label}")
+
+                            # Save all result notifications; year/semester filtering is applied at read time.
+                            if save_result(student_id, scoped_notification_id, parsed):
+                                new_results_saved += 1
+                                print(f"  ✓ Saved result {new_results_saved}: {parsed.get('subject', 'Unknown')} - {parsed.get('exam_type', 'Unknown')} [{sem_label}]")
                             else:
-                                print(f"DEBUG: ✗ Skipping result {notification_id} - no valid semester found")
+                                print(f"  ✗ Failed to save notification {notification_id}")
                         else:
-                            print(f"DEBUG: Notification {notification_id} already exists for student {student_id}")
+                            print(f"  → Already exists for student {student_id}")
                     else:
-                        print(f"DEBUG: ✗ Notification {notification_id} is NOT result-related")
+                        non_result_count += 1
+                        print(f"  ✗ NOT result-related (no keyword match)")
+                
+                print(f"DEBUG: Processed summary: {result_count} result-related, {non_result_count} non-result")
             else:
                 print(f"DEBUG: No notifications received from API")
             
             # Fetch results from database (this is our persistent source)
             print(f"DEBUG: Fetching stored results for student {student_id}")
-            stored_results = get_student_results(student_id, limit=100)
+            stored_results = get_student_results(student_id, limit=500)
             print(f"DEBUG: Found {len(stored_results)} stored results in database")
             
             # Format results for frontend
             result_items = []
             for stored in stored_results:
+                raw_text = stored.get('raw_text', '')
+                semester_raw = stored.get('semester', '')
+
+                # Data-safety guard: only return current academic year for the authenticated student
+                if not self._belongs_to_target_year(semester_raw, raw_text):
+                    continue
+
+                semester_display = self._to_semester_display(semester_raw, raw_text)
+                if not semester_display:
+                    continue
+
                 result_item = {
-                    'id': stored.get('notification_id', ''),
+                    'id': str(stored.get('notification_id', '')).split(':', 1)[-1],
                     'date': stored.get('exam_date', stored.get('created_at', '')),
-                    'raw_text': stored.get('raw_text', ''),
+                    'raw_text': raw_text,
                     'subject': stored.get('subject'),
                     'exam_type': stored.get('exam_type'),
                     'score': stored.get('score'),
                     'grade': stored.get('grade'),
-                    'semester': stored.get('semester'),
+                    'semester': semester_raw,
+                    'semester_display': semester_display,
                     'status': stored.get('status'),
                 }
                 result_items.append(result_item)
             
+            deduped_items = self._dedupe_result_items(result_items)
             return {
                 'success': True,
-                'results': result_items,
-                'total_count': len(result_items),
+                'results': deduped_items,
+                'total_count': len(deduped_items),
                 'new_results_saved': new_results_saved
             }
         
         except Exception as e:
             # If API fetch fails, still try to return stored results
             try:
-                stored_results = get_student_results(student_id, limit=100)
+                stored_results = get_student_results(student_id, limit=500)
                 result_items = []
                 for stored in stored_results:
+                    raw_text = stored.get('raw_text', '')
+                    semester_raw = stored.get('semester', '')
+
+                    if not self._belongs_to_target_year(semester_raw, raw_text):
+                        continue
+
+                    semester_display = self._to_semester_display(semester_raw, raw_text)
+                    if not semester_display:
+                        continue
+
                     result_item = {
-                        'id': stored.get('notification_id', ''),
+                        'id': str(stored.get('notification_id', '')).split(':', 1)[-1],
                         'date': stored.get('exam_date', stored.get('created_at', '')),
-                        'raw_text': stored.get('raw_text', ''),
+                        'raw_text': raw_text,
                         'subject': stored.get('subject'),
                         'exam_type': stored.get('exam_type'),
                         'score': stored.get('score'),
                         'grade': stored.get('grade'),
-                        'semester': stored.get('semester'),
+                        'semester': semester_raw,
+                        'semester_display': semester_display,
                         'status': stored.get('status'),
                     }
                     result_items.append(result_item)
                 
+                deduped_items = self._dedupe_result_items(result_items)
                 return {
                     'success': True,
-                    'results': result_items,
-                    'total_count': len(result_items),
+                    'results': deduped_items,
+                    'total_count': len(deduped_items),
                     'warning': f'Using stored results. API error: {str(e)}',
                     'new_results_saved': 0
                 }

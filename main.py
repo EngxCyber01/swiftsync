@@ -3,6 +3,7 @@ import hmac
 import ipaddress
 import logging
 import os
+import re
 import sqlite3
 import time
 import requests
@@ -927,6 +928,9 @@ async def attendance_login(request: Request) -> JSONResponse:
                 "student_id": result['student_id'],
                 "username": result['username']
             })
+
+            # Browsers reject Secure cookies on http://localhost.
+            is_secure_request = request.url.scheme == "https"
             
             # ANDROID FIX: Set HTTP cookie for session persistence
             # Using explicit cookie settings for maximum Android compatibility
@@ -936,7 +940,7 @@ async def attendance_login(request: Request) -> JSONResponse:
                 max_age=3600,  # 1 hour - longer timeout for Android stability
                 path="/",
                 domain=None,  # Prevents subdomain mismatch issues
-                secure=True,  # Always secure for HTTPS (Render deployment)
+                secure=is_secure_request,
                 httponly=True,  # Security: Prevent XSS attacks
                 samesite="lax"  # Safer default for same-site app flows
             )
@@ -2009,6 +2013,163 @@ async def get_official_results(request: Request) -> JSONResponse:
         }, status_code=500)
 
 
+@app.get("/api/results/debug")
+async def debug_results(request: Request) -> JSONResponse:
+    """
+    DEBUG ENDPOINT: Show all stored results (filtered and unfiltered) for current user
+    Helps diagnose semester detection and filtering issues
+    """
+    try:
+        session_token = _resolve_session_token(request)
+        
+        if not session_token or session_token.strip() == "":
+            return JSONResponse({
+                "success": False,
+                "error": "Session token required. Please login first."
+            }, status_code=401)
+        
+        # Get session and student ID
+        session = attendance_service.session_manager.get_session(session_token)
+        if not session:
+            return JSONResponse({
+                "success": False,
+                "error": "Session expired or invalid."
+            }, status_code=401)
+        
+        student_id = session.get('student_id', '')
+        if not student_id:
+            return JSONResponse({
+                "success": False,
+                "error": "Student ID not found in session."
+            }, status_code=400)
+        
+        # Get ALL stored results for this student (no filtering)
+        from database import get_student_results
+        all_stored = get_student_results(student_id, limit=500)
+        
+        # Analyze each result
+        debug_results = []
+        for stored in all_stored:
+            raw_text = stored.get('raw_text', '')
+            semester_raw = stored.get('semester', '')
+            
+            # Check if it passes year filter
+            year_check = results_service._belongs_to_target_year(semester_raw, raw_text)
+            
+            # Get semester display (if passes year filter)
+            semester_display = results_service._to_semester_display(semester_raw, raw_text) if year_check else None
+            
+            # Check fall/spring detection
+            combined = f"{semester_raw or ''} {raw_text or ''}".lower()
+            is_fall = bool(re.search(r'(?:[_\-]f[_\-]?\d{2}-\d{2}|\bfall\b|\b1st\s+semester\b|\bfirst\s+semester\b)', combined))
+            is_spring = bool(re.search(r'(?:[_\-]s[_\-]?\d{2}-\d{2}|\bspring\b|\b2nd\s+semester\b|\bsecond\s+semester\b)', combined))
+            
+            debug_results.append({
+                'subject': stored.get('subject'),
+                'exam_type': stored.get('exam_type'),
+                'score': stored.get('score'),
+                'semester_raw': semester_raw,
+                'raw_text_sample': raw_text[:100] if raw_text else '',
+                'passes_year_filter': year_check,
+                'is_fall_detected': is_fall,
+                'is_spring_detected': is_spring,
+                'semester_display_mapped': semester_display,
+                'created_at': stored.get('created_at', '')
+            })
+        
+        # Count by semester
+        fall_count = sum(1 for r in debug_results if r['is_fall_detected'])
+        spring_count = sum(1 for r in debug_results if r['is_spring_detected'])
+        pass_filter_count = sum(1 for r in debug_results if r['passes_year_filter'])
+        
+        return JSONResponse({
+            "success": True,
+            "student_id": student_id,
+            "summary": {
+                "total_stored": len(all_stored),
+                "pass_year_filter": pass_filter_count,
+                "fall_detected": fall_count,
+                "spring_detected": spring_count,
+                "no_semester_detected": len(all_stored) - fall_count - spring_count
+            },
+            "debug_results": debug_results,
+            "target_year": f"{results_service.TARGET_ACADEMIC_YEAR_FULL} ({results_service.TARGET_ACADEMIC_YEAR_SHORT})"
+        })
+    
+    except Exception as exc:
+        logger.exception("Error in debug results: %s", str(exc))
+        return JSONResponse({
+            "success": False,
+            "error": f"Error: {str(exc)}",
+            "debug_results": []
+        }, status_code=500)
+
+
+@app.post("/api/results/refresh")
+async def refresh_results(request: Request) -> JSONResponse:
+    """
+    REFRESH ENDPOINT: Clear cached results and force fetch fresh from portal
+    Useful when you know portal has new data and cached data is stale
+    Clears old data and triggers immediate re-fetch from portal API
+    """
+    try:
+        session_token = _resolve_session_token(request)
+        
+        if not session_token or session_token.strip() == "":
+            return JSONResponse({
+                "success": False,
+                "error": "Session token required. Please login first."
+            }, status_code=401)
+        
+        # Get session and student ID
+        session = attendance_service.session_manager.get_session(session_token)
+        if not session:
+            return JSONResponse({
+                "success": False,
+                "error": "Session expired or invalid."
+            }, status_code=401)
+        
+        student_id = session.get('student_id', '')
+        if not student_id:
+            return JSONResponse({
+                "success": False,
+                "error": "Student ID not found in session."
+            }, status_code=400)
+        
+        # Clear all old results for this student
+        from database import clear_student_results
+        cleared_count = clear_student_results(student_id)
+        logger.info(f"Cleared {cleared_count} old results for student {student_id}")
+        
+        # Now force fetch fresh from portal
+        result = await results_service.get_results(session_token, attendance_service.session_manager)
+        logger.info(f"Fresh fetch: success={result.get('success')}, new_saved={result.get('new_results_saved', 0)}, total={result.get('total_count', 0)}")
+        
+        if result['success']:
+            return JSONResponse({
+                "success": True,
+                "message": f"Cleared {cleared_count} old results. Fetched {result.get('new_results_saved', 0)} fresh results from portal.",
+                "results": result['results'],
+                "total_count": result.get('total_count', 0),
+                "new_results_saved": result.get('new_results_saved', 0)
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "error": result.get('error', 'Failed to fetch fresh results'),
+                "results": []
+            }, status_code=500)
+    
+    except Exception as exc:
+        logger.exception("Error refreshing results: %s", str(exc))
+        return JSONResponse({
+            "success": False,
+            "error": f"Error: {str(exc)}",
+            "results": []
+        }, status_code=500)
+
+
+
 # ============================================
 # ADMIN SOC (Security Operations Center)
 # ============================================
@@ -2062,6 +2223,24 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
     recent_visitors = db.get_recent_visitors(100)
     blocked_ips = db.get_blocked_ips()
     threat_logs = db.get_threat_logs(50)
+
+    def _render_device_info(user_agent: str) -> str:
+        if not user_agent:
+            return "<span style='color: var(--text-secondary);'>Unknown</span>"
+        device = db.detect_device_type(user_agent)
+        return (
+            "<div style=\"display: flex; flex-direction: column; gap: 4px;\">"
+            "<span style=\"display: flex; align-items: center; gap: 6px; color: var(--kurdish-yellow); font-weight: 600; font-size: 0.875rem;\">"
+            f"<i class=\"fas {device['icon']}\"></i>{device['device']}"
+            "</span>"
+            "<span style=\"color: var(--text-secondary); font-size: 0.75rem;\">"
+            f"<i class=\"fas fa-desktop\" style=\"font-size: 0.7rem;\"></i> {device['os']}"
+            "</span>"
+            "<span style=\"color: var(--text-secondary); font-size: 0.75rem;\">"
+            f"<i class=\"fas fa-globe\" style=\"font-size: 0.7rem;\"></i> {device['browser']}"
+            "</span>"
+            "</div>"
+        )
     
     return HTMLResponse(content=f"""
     <!DOCTYPE html>
@@ -2949,20 +3128,7 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                                     </span>
                                 </td>
                                 <td>
-                                    {f"""
-                                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                                        <span style="display: flex; align-items: center; gap: 6px; color: var(--kurdish-yellow); font-weight: 600; font-size: 0.875rem;">
-                                            <i class="fas {db.detect_device_type(visitor['user_agent'])['icon']}"></i>
-                                            {db.detect_device_type(visitor['user_agent'])['device']}
-                                        </span>
-                                        <span style="color: var(--text-secondary); font-size: 0.75rem;">
-                                            <i class="fas fa-desktop" style="font-size: 0.7rem;"></i> {db.detect_device_type(visitor['user_agent'])['os']}
-                                        </span>
-                                        <span style="color: var(--text-secondary); font-size: 0.75rem;">
-                                            <i class="fas fa-globe" style="font-size: 0.7rem;"></i> {db.detect_device_type(visitor['user_agent'])['browser']}
-                                        </span>
-                                    </div>
-                                    """ if visitor['user_agent'] else "<span style='color: var(--text-secondary);'>Unknown</span>"}
+                                    {_render_device_info(visitor['user_agent'])}
                                 </td>
                                 <td class="timestamp" style="font-family: 'SF Mono', monospace; font-size: 0.8rem;">
                                     <i class="fas fa-calendar-alt" style="color: var(--kurdish-yellow); margin-right: 4px;"></i>
@@ -3555,7 +3721,7 @@ async def dashboard() -> HTMLResponse:
             /* Header */
             .nav {{
                 display: grid;
-                grid-template-columns: minmax(240px, 1fr) minmax(260px, 1.2fr) auto;
+                grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
                 align-items: center;
                 column-gap: 1rem;
                 padding: 1.05rem 1.25rem;
@@ -3572,6 +3738,7 @@ async def dashboard() -> HTMLResponse:
                 align-items: center;
                 gap: 0.8rem;
                 min-width: 0;
+                justify-self: start;
             }}
             
             .logo-icon {{
@@ -3750,6 +3917,7 @@ async def dashboard() -> HTMLResponse:
                 align-items: center;
                 flex-wrap: wrap;
                 justify-content: flex-end;
+                justify-self: end;
             }}
             
             /* Kurdish Text Animation (in navbar) - Fixed size to prevent layout shift */
@@ -3763,7 +3931,7 @@ async def dashboard() -> HTMLResponse:
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
                 background-clip: text;
-                width: 100%;
+                width: max-content;
                 max-width: 360px;
                 height: 30px;
                 min-height: 30px;
@@ -3773,6 +3941,7 @@ async def dashboard() -> HTMLResponse:
                 justify-content: center;
                 white-space: nowrap;
                 overflow: hidden;
+                justify-self: center;
             }}
             
             @keyframes cursorBlink {{
@@ -3840,8 +4009,8 @@ async def dashboard() -> HTMLResponse:
             }}
             
             .stat-card:nth-child(1) .stat-icon {{ color: var(--accent); }}
-            .stat-card:nth-child(2) .stat-icon {{ color: var(--success); }}
-            .stat-card:nth-child(3) .stat-icon {{ color: #ff0080; }}
+            .stat-card:nth-child(2) .stat-icon {{ color: var(--accent); }}
+            .stat-card:nth-child(3) .stat-icon {{ color: var(--accent); }}
             
             .stat-trend {{
                 font-size: 0.75rem;
@@ -5903,8 +6072,8 @@ async def dashboard() -> HTMLResponse:
                                 <input type="password" id="attendancePassword" required placeholder="Enter your password" />
                             </div>
                             <label class="remember-me">
-                                <input type="checkbox" id="rememberMe" checked />
-                                <span>Remember me (instant login next time)</span>
+                                <input type="checkbox" id="rememberMe" />
+                                <span>Remember username on this device</span>
                             </label>
                             <button type="submit" class="login-submit-btn" id="loginSubmitBtn">
                                 <i class="fas fa-sign-in-alt"></i>
@@ -5912,7 +6081,7 @@ async def dashboard() -> HTMLResponse:
                             </button>
                             <div class="login-note">
                                 <i class="fas fa-bolt"></i>
-                                <span>Next login will be instant! Credentials encrypted locally.</span>
+                                <span>Each student must login with their own university account.</span>
                             </div>
                         </form>
                     </div>
@@ -6057,8 +6226,8 @@ async def dashboard() -> HTMLResponse:
             }};
             
             // Attendance variables - Use safe storage
-            var attendanceSessionToken = safeStorage.getItem('attendance_session_active') ? 'cookie-session' : null;
-            var attendanceUsername = safeStorage.getItem('attendance_username') || null;
+            var attendanceSessionToken = null;
+            var attendanceUsername = null;
             var attendanceRefreshInterval = null;
             var privateDataBootstrapped = false;
             
@@ -6174,8 +6343,7 @@ async def dashboard() -> HTMLResponse:
 
             function getPrivateOwnerKey() {{
                 // Scope private caches to the currently authenticated identity
-                // Prefer username (stable across refresh), fall back to token
-                return attendanceUsername || safeStorage.getItem('attendance_username') || attendanceSessionToken || '';
+                return attendanceUsername || attendanceSessionToken || '';
             }}
 
             function clearPrivateCaches() {{
@@ -7163,11 +7331,6 @@ async def dashboard() -> HTMLResponse:
                     // Keep data fixed during active session (no periodic forced reloads).
                     stopAttendanceAutoRefresh();
                 }} else {{
-                    const savedUsername = safeStorage.getItem('attendance_saved_username');
-                    if (savedUsername) {{
-                        document.getElementById('attendanceUsername').value = savedUsername;
-                        document.getElementById('rememberMe').checked = true;
-                    }}
                     // Show login form
                     document.getElementById('privateLoginArea').style.display = 'block';
                     document.getElementById('privateDataArea').style.display = 'none';
@@ -7219,8 +7382,6 @@ async def dashboard() -> HTMLResponse:
                         // Save session token
                         attendanceSessionToken = 'cookie-session';
                         attendanceUsername = result.username;
-                        safeStorage.setItem('attendance_session_active', '1');
-                        safeStorage.setItem('attendance_username', attendanceUsername);
 
                         // New authenticated identity: scope caches to this user
                         ensurePrivateCacheOwner();
@@ -7264,7 +7425,7 @@ async def dashboard() -> HTMLResponse:
                         }}
 
                         if (!prefetchState.resultAlertsReady || !prefetchState.officialResultsReady) {{
-                            showNotification('Some private sections are still loading. Open a tab to auto-retry.', 'error');
+                            console.warn('Some private sections are still loading in background; tab switch will auto-retry.');
                         }}
                         
                         // Keep private data fixed during active session.
@@ -7784,69 +7945,30 @@ async def dashboard() -> HTMLResponse:
                 // focuses on the per-semester breakdown only.
                 let htmlContent = '';
                 
-                // Function to map semester codes to readable semester numbers (1-4)
-                function getSemesterName(semesterCode) {{
-                    if (!semesterCode || semesterCode.trim() === '') {{
-                        return null;
-                    }}
-                    
-                    // Parse patterns like "Software_F25-26", "Software_S25-26", "Software_S_25-26", etc.
-                    const match = semesterCode.match(/([A-Za-z]+)_?([FS])_?(\\d{{2}})-(\\d{{2}})/);
-                    if (match) {{
-                        const [, group, season, startYear, endYear] = match;
-                        const fullStartYear = 2000 + parseInt(startYear);
-                        
-                        // Map academic years to semester numbers
-                        // 24-25: Fall=Semester 1, Spring=Semester 2
-                        // 25-26: Fall=Semester 3, Spring=Semester 4
-                        let semesterNum;
-                        if (fullStartYear === 2024) {{
-                            semesterNum = season === 'F' ? 1 : 2;
-                        }} else if (fullStartYear === 2025) {{
-                            semesterNum = season === 'F' ? 3 : 4;
-                        }} else {{
-                            // For other years, calculate based on offset from 2024
-                            const yearOffset = fullStartYear - 2024;
-                            semesterNum = (yearOffset * 2) + (season === 'F' ? 1 : 2);
-                        }}
-                        
-                        return `Semester ${{semesterNum}}`;
-                    }}
-                    
-                    // Try to extract semester number from patterns like "24_sf_1st_b", "Group A"
-                    const semesterNumMatch = semesterCode.match(/(\\d+)/);
-                    if (semesterNumMatch) {{
-                        const num = Math.max(1, parseInt(semesterNumMatch[1]));
-                        return `Semester ${{num}}`;
-                    }}
-                    
-                    // For unrecognized patterns, return null to filter out
+                function getSemesterDisplay(result) {{
+                    // Prefer backend canonical label when available.
+                    if (result && result.semester_display) return result.semester_display;
+
+                    const combined = `${{result?.semester || ''}} ${{result?.raw_text || ''}}`.toLowerCase();
+                    const inCurrentYear = combined.includes('2025-2026') || combined.includes('25-26');
+                    if (!inCurrentYear) return null;
+
+                    const isFall = /(?:_f_|\bfall\b|\b1st\s+semester\b|\bfirst\s+semester\b)/i.test(combined);
+                    const isSpring = /(?:_s_|\bspring\b|\b2nd\s+semester\b|\bsecond\s+semester\b)/i.test(combined);
+
+                    if (isFall) return '2025-2026 Fall Semester';
+                    if (isSpring) return '2025-2026 Spring Semester';
                     return null;
                 }}
-                
-                // Group results by DISPLAY semester name (Semester 1, 2, 3, 4)
-                // This ensures all results with same semester number are grouped together
+
+                // Group results by canonical semester display name.
                 const resultsBySemester = {{}};
                 results.forEach(result => {{
-                    const rawSemester = result.semester;
-                    const displaySemester = getSemesterName(rawSemester);
+                    const displaySemester = getSemesterDisplay(result);
                     
                     // Skip results without valid semester
                     if (!displaySemester) {{
                         return;
-                    }}
-                    
-                    // Filter out "skill" subjects from Semester 4 (they belong to Semester 1)
-                    const subjectLower = (result.subject || '').toLowerCase();
-                    if (displaySemester === 'Semester 4' && subjectLower.includes('skill')) {{
-                        return; // Skip this result
-                    }}
-                    
-                    // Show all semesters except Semester 1 and Semester 2
-                    const semNumMatch = displaySemester.match(/(\\d+)/);
-                    const semNum = semNumMatch ? parseInt(semNumMatch[1]) : null;
-                    if (semNum && semNum <= 2) {{
-                        return; // Skip semesters 1 and 2
                     }}
                     
                     if (!resultsBySemester[displaySemester]) {{
@@ -7867,12 +7989,13 @@ async def dashboard() -> HTMLResponse:
                     return;
                 }}
                 
-                // Sort semesters by semester number (1, 2, 3, 4)
+                // Keep fixed academic order.
                 const sortedSemesters = Object.keys(resultsBySemester).sort((a, b) => {{
-                    // Extract semester numbers from "Semester 1", "Semester 2", etc.
-                    const numA = parseInt(a.match(/\\d+/)[0]);
-                    const numB = parseInt(b.match(/\\d+/)[0]);
-                    return numA - numB; // Sort ascending (Semester 1, 2, 3, 4)
+                    const order = {{
+                        '2025-2026 Fall Semester': 1,
+                        '2025-2026 Spring Semester': 2,
+                    }};
+                    return (order[a] || 99) - (order[b] || 99);
                 }});
                 
                 // Render each semester section
@@ -8401,24 +8524,12 @@ async def dashboard() -> HTMLResponse:
                     console.error('❌ localStorage test failed:', e);
                 }}
                 
-                // Auto-restore attendance session on page load
-                if (attendanceSessionToken && !isSessionExpired()) {{
-                    console.log('🔄 Found valid attendance session, auto-logging in...');
-                    console.log('⏰ Session timestamp:', safeStorage.getItem('attendance_session_timestamp'));
-                    // Switch to attendance zone and load data
-                    setTimeout(() => {{
-                        switchZone('private');
-                    }}, 500); // Small delay to ensure DOM is ready
-                }} else if (attendanceSessionToken && isSessionExpired()) {{
-                    console.log('⚠️ Session expired, clearing...');
-                    // Clear expired session
-                    attendanceSessionToken = null;
-                    safeStorage.removeItem('attendance_session_active');
-                    safeStorage.removeItem('attendance_username');
-                    safeStorage.removeItem('attendance_session_timestamp');
-                }} else {{
-                    console.log('ℹ️ No valid session found on page load');
-                }}
+                // Always start in logged-out mode on page load.
+                attendanceSessionToken = null;
+                safeStorage.removeItem('attendance_session_active');
+                safeStorage.removeItem('attendance_username');
+                safeStorage.removeItem('attendance_session_timestamp');
+                console.log('ℹ️ Fresh login required on each page load');
             }});
         </script>
         

@@ -595,6 +595,22 @@ def result_exists(notification_id: str, student_id: str = None) -> bool:
         return False
 
 
+def clear_student_results(student_id: str) -> int:
+    """Clear all results for a specific student and return count of deleted records"""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            # Delete all results for this student
+            cursor.execute("DELETE FROM results WHERE student_id = ?", (student_id,))
+            conn.commit()
+            deleted_count = cursor.rowcount
+            print(f"Cleared {deleted_count} results for student {student_id}")
+            return deleted_count
+    except Exception as e:
+        print(f"Error clearing student results: {e}")
+        return 0
+
+
 def get_all_results_count() -> int:
     """Get total number of results stored"""
     try:

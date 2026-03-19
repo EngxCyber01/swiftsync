@@ -1,6 +1,6 @@
 import os
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import requests
@@ -17,8 +17,9 @@ class AuthConfig:
 
     login_url: str = "https://tempids-su.awrosoft.com/account/login"
     oidc_callback_url: str = "https://tempapp-su.awrosoft.com/erp-web-signin-oidc"
-    username: str = os.getenv("PORTAL_USERNAME", "")
-    password: str = os.getenv("PORTAL_PASSWORD", "")
+    # Read credentials at instance creation time so .env overrides applied later are respected.
+    username: str = field(default_factory=lambda: (os.getenv("PORTAL_USERNAME") or "").strip())
+    password: str = field(default_factory=lambda: os.getenv("PORTAL_PASSWORD") or "")
     verify_ssl: bool = True
     
     def __post_init__(self):
@@ -71,12 +72,23 @@ class AuthClient:
         return form_data
 
     def _is_authenticated(self, session: requests.Session) -> bool:
-        # Check for any auth cookies from either domain
-        has_identity_cookie = any(cookie.name in (".AspNetCore.Cookies", ".AspNetCore.Identity.Application") 
-                                   for cookie in session.cookies)
-        has_app_cookie = any("AspNetCore" in cookie.name and "tempapp-su.awrosoft.com" in cookie.domain 
-                              for cookie in session.cookies)
-        return has_identity_cookie or has_app_cookie or len(session.cookies) > 0
+        # Correlation/nonce/antiforgery cookies are not proof of a logged-in portal session.
+        transient_markers = ("Correlation", "Nonce", "Antiforgery")
+        auth_cookie_names = (
+            ".AspNetCore.Cookies",
+            ".AspNetCore.Identity.Application",
+            ".AspNetCore.Session",
+        )
+
+        has_known_auth_cookie = any(cookie.name in auth_cookie_names for cookie in session.cookies)
+
+        has_non_transient_app_cookie = any(
+            ("tempapp-su.awrosoft.com" in (cookie.domain or ""))
+            and not any(marker in cookie.name for marker in transient_markers)
+            for cookie in session.cookies
+        )
+
+        return has_known_auth_cookie or has_non_transient_app_cookie
 
     def login(self) -> requests.Session:
         if not self.config.username or not self.config.password:
