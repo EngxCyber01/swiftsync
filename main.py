@@ -5141,6 +5141,88 @@ async def dashboard() -> HTMLResponse:
                 color: #ef4444;
                 background: rgba(239, 68, 68, 0.1);
             }}
+
+            .logout-confirm-modal .modal-content {{
+                max-width: 460px;
+                width: calc(100% - 2rem);
+                border: 1px solid rgba(239, 68, 68, 0.35);
+                box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+            }}
+
+            .logout-confirm-body {{
+                padding: 2rem;
+                text-align: center;
+            }}
+
+            .logout-confirm-icon {{
+                width: 74px;
+                height: 74px;
+                border-radius: 50%;
+                margin: 0 auto 1rem auto;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.9rem;
+                color: #ef4444;
+                background: radial-gradient(circle at center, rgba(239, 68, 68, 0.22), rgba(239, 68, 68, 0.08));
+                border: 1px solid rgba(239, 68, 68, 0.3);
+            }}
+
+            .logout-confirm-body h3 {{
+                margin: 0 0 0.55rem 0;
+                font-size: 1.25rem;
+                color: var(--text-primary);
+            }}
+
+            .logout-confirm-body p {{
+                margin: 0;
+                color: var(--text-secondary);
+                font-size: 0.95rem;
+                line-height: 1.55;
+            }}
+
+            .logout-confirm-actions {{
+                margin-top: 1.4rem;
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0.75rem;
+            }}
+
+            .logout-cancel-btn,
+            .logout-confirm-btn {{
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                min-height: 42px;
+                font-size: 0.9rem;
+                font-weight: 700;
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 0.45rem;
+                transition: all 0.25s ease;
+            }}
+
+            .logout-cancel-btn {{
+                background: var(--glass);
+                color: var(--text-primary);
+            }}
+
+            .logout-cancel-btn:hover {{
+                background: var(--bg-tertiary);
+                transform: translateY(-1px);
+            }}
+
+            .logout-confirm-btn {{
+                border-color: rgba(239, 68, 68, 0.45);
+                background: linear-gradient(135deg, #ef4444, #dc2626);
+                color: #fff;
+            }}
+
+            .logout-confirm-btn:hover {{
+                transform: translateY(-1px);
+                box-shadow: 0 12px 24px rgba(239, 68, 68, 0.35);
+            }}
             
             .attendance-content-wrapper {{
                 margin-top: 2rem;
@@ -5736,6 +5818,9 @@ async def dashboard() -> HTMLResponse:
                 .modal-content {{ max-width: 95%; margin: 1rem; }}
                 .modal-header {{ padding: 1.5rem; }}
                 .modal-body {{ padding: 1.5rem; }}
+                .logout-confirm-modal .modal-content {{ width: calc(100% - 1.25rem); }}
+                .logout-confirm-body {{ padding: 1.4rem 1.1rem 1.3rem 1.1rem; }}
+                .logout-confirm-actions {{ grid-template-columns: 1fr; }}
                 
                 .zone-tabs {{ flex-direction: column; gap: 0.4rem; margin-bottom: 1.1rem; padding: 0.4rem; border-radius: 16px; }}
                 .zone-tab {{ padding: 0.55rem 0.9rem; font-size: 0.88rem; border-radius: 12px; gap: 0.45rem; min-height: 44px; }}
@@ -6156,7 +6241,7 @@ async def dashboard() -> HTMLResponse:
                             <i class="fas fa-user-graduate"></i> 
                             <span id="studentNameDisplay">Student Portal</span>
                         </h2>
-                        <button class="logout-btn" onclick="logoutAttendance()">
+                        <button class="logout-btn" onclick="openLogoutConfirmModal()">
                             <i class="fas fa-sign-out-alt"></i>
                             <span>Logout</span>
                         </button>
@@ -6218,6 +6303,28 @@ async def dashboard() -> HTMLResponse:
                 </div>
                 <div class="modal-body" id="modalBody">
                     <!-- Summary content will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <div id="logoutConfirmModal" class="modal logout-confirm-modal">
+            <div class="modal-content">
+                <div class="logout-confirm-body">
+                    <div class="logout-confirm-icon">
+                        <i class="fas fa-sign-out-alt"></i>
+                    </div>
+                    <h3>Confirm Logout</h3>
+                    <p>You are about to sign out from your private student area. Do you want to continue?</p>
+                    <div class="logout-confirm-actions">
+                        <button type="button" class="logout-cancel-btn" onclick="closeLogoutConfirmModal()">
+                            <i class="fas fa-arrow-left"></i>
+                            <span>Stay Logged In</span>
+                        </button>
+                        <button type="button" class="logout-confirm-btn" onclick="confirmLogoutAttendance()">
+                            <i class="fas fa-check"></i>
+                            <span>Yes, Logout</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -7052,14 +7159,41 @@ async def dashboard() -> HTMLResponse:
             
             // ===== AI SUMMARIZATION FUNCTIONS =====
             
+            function refreshBodyModalState() {{
+                const activeModal = document.querySelector('.modal.active');
+                document.body.style.overflow = activeModal ? 'hidden' : 'auto';
+            }}
+
             function openSummaryModal() {{
                 document.getElementById('summaryModal').classList.add('active');
-                document.body.style.overflow = 'hidden';
+                refreshBodyModalState();
             }}
             
             function closeSummaryModal() {{
                 document.getElementById('summaryModal').classList.remove('active');
-                document.body.style.overflow = 'auto';
+                refreshBodyModalState();
+            }}
+
+            function openLogoutConfirmModal() {{
+                const logoutModal = document.getElementById('logoutConfirmModal');
+                if (!logoutModal) {{
+                    logoutAttendance(true);
+                    return;
+                }}
+                logoutModal.classList.add('active');
+                refreshBodyModalState();
+            }}
+
+            function closeLogoutConfirmModal() {{
+                const logoutModal = document.getElementById('logoutConfirmModal');
+                if (!logoutModal) return;
+                logoutModal.classList.remove('active');
+                refreshBodyModalState();
+            }}
+
+            function confirmLogoutAttendance() {{
+                closeLogoutConfirmModal();
+                logoutAttendance(true);
             }}
             
             // Close modal when clicking outside
@@ -7068,11 +7202,24 @@ async def dashboard() -> HTMLResponse:
                     closeSummaryModal();
                 }}
             }});
+
+            const logoutConfirmModal = document.getElementById('logoutConfirmModal');
+            if (logoutConfirmModal) {{
+                logoutConfirmModal.addEventListener('click', (e) => {{
+                    if (e.target.id === 'logoutConfirmModal') {{
+                        closeLogoutConfirmModal();
+                    }}
+                }});
+            }}
             
             // Close modal with Escape key
             document.addEventListener('keydown', (e) => {{
                 if (e.key === 'Escape') {{
-                    closeSummaryModal();
+                    if (logoutConfirmModal && logoutConfirmModal.classList.contains('active')) {{
+                        closeLogoutConfirmModal();
+                    }} else {{
+                        closeSummaryModal();
+                    }}
                 }}
             }});
             
@@ -7804,7 +7951,7 @@ async def dashboard() -> HTMLResponse:
                     }} else {{
                         // Session expired or error
                         if (attendanceResult.error && attendanceResult.error.toLowerCase().includes('expired')) {{
-                            logoutAttendance();
+                            logoutAttendance(true);
                             alert('Session expired. Please login again.');
                         }} else {{
                             document.getElementById('attendanceContent').innerHTML = `
@@ -7837,7 +7984,14 @@ async def dashboard() -> HTMLResponse:
                 return inFlightAttendance;
             }}
             
-            async function logoutAttendance() {{
+            async function logoutAttendance(forceImmediate = false) {{
+                if (!forceImmediate) {{
+                    openLogoutConfirmModal();
+                    return;
+                }}
+
+                closeLogoutConfirmModal();
+
                 // Stop auto-refresh
                 stopAttendanceAutoRefresh();
 
@@ -7946,7 +8100,7 @@ async def dashboard() -> HTMLResponse:
                     }} else {{
                         // Session expired or error
                         if (result.error && result.error.toLowerCase().includes('expired')) {{
-                            logoutAttendance();
+                            logoutAttendance(true);
                             alert('Session expired. Please login again.');
                         }} else {{
                             document.getElementById('resultsContent').innerHTML = `
@@ -8233,7 +8387,7 @@ async def dashboard() -> HTMLResponse:
                     }} else {{
                         // Session expired or error
                         if (result.error && result.error.toLowerCase().includes('expired')) {{
-                            logoutAttendance();
+                            logoutAttendance(true);
                             alert('Session expired. Please login again.');
                         }} else {{
                             // Keep showing last cached results if we have any,
