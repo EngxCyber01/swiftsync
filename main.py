@@ -7402,12 +7402,8 @@ async def dashboard() -> HTMLResponse:
                         // Fetch ALL private data during login loading, so tabs are instant after login.
                         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Loading your data...</span>';
 
-                        // Hard gate: start and await all three private endpoints during login.
+                        // Start private prefetch during login, but do not block authenticated entry on slow mobile networks.
                         const prefetchState = await preloadPrivateDataForLogin({{ deferUiReveal: true, forceRefresh: true }});
-                        if (!prefetchState.attendanceReady) {{
-                            throw new Error('Unable to load attendance data. Please try again.');
-                        }}
-
                         privateDataBootstrapped = true;
 
                         // Now reveal private mode UI (everything should be ready)
@@ -7422,6 +7418,19 @@ async def dashboard() -> HTMLResponse:
                             switchPrivateSection('official-results');
                         }} else {{
                             switchPrivateSection('attendance');
+                        }}
+
+                        if (!prefetchState.attendanceReady) {{
+                            document.getElementById('attendanceContent').innerHTML = `
+                                <div class="empty-state">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    <h3>Attendance Is Still Loading</h3>
+                                    <p>Login succeeded. Tap retry to load attendance data.</p>
+                                    <button onclick="loadAttendanceData(false, false)" style="margin-top: 1rem; padding: 0.6rem 1rem; background: var(--accent); color: #fff; border: none; border-radius: 10px; cursor: pointer;">
+                                        <i class="fas fa-sync"></i> Retry Attendance
+                                    </button>
+                                </div>
+                            `;
                         }}
 
                         if (!prefetchState.resultAlertsReady || !prefetchState.officialResultsReady) {{
@@ -7689,7 +7698,7 @@ async def dashboard() -> HTMLResponse:
                     let loadedSuccessfully = false;
                     try {{
                         // Fetch attendance data first
-                        const attendanceResult = await apiFetchJson('/api/attendance/data', {{}}, 2, 12000);
+                        const attendanceResult = await apiFetchJson('/api/attendance/data', {{}}, 2, 25000);
                     
                         // If user logged out / switched user while request was in-flight, ignore results
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
