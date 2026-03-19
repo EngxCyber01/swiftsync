@@ -385,9 +385,12 @@ async def sync_worker() -> None:
                     if len(new_item_ids) == 1 and files:
                         # Get subject for single lecture
                         subject = subject_map.get(new_item_ids[0], "بابەتی جیاواز")
-                        notify_new_lecture(files[0], subject=subject, base_url=BASE_URL)
-                        _mark_notified(new_item_ids[0])
-                        logger.info(f"✅ Telegram notification sent for 1 lecture (ID: {new_item_ids[0]}, Subject: {subject})")
+                        sent_ok = notify_new_lecture(files[0], subject=subject, base_url=BASE_URL)
+                        if sent_ok:
+                            _mark_notified(new_item_ids[0])
+                            logger.info(f"✅ Telegram notification sent for 1 lecture (ID: {new_item_ids[0]}, Subject: {subject})")
+                        else:
+                            logger.warning(f"⚠️ Telegram send failed for 1 lecture (ID: {new_item_ids[0]}, Subject: {subject})")
                     elif len(new_item_ids) > 1:
                         # Group lectures by subject
                         subjects_count = {}
@@ -396,13 +399,19 @@ async def sync_worker() -> None:
                             subjects_count[subject] = subjects_count.get(subject, 0) + 1
                         
                         # Send notification for each subject with multiple lectures
+                        all_sent_ok = True
                         for subject, count in subjects_count.items():
-                            notify_multiple_lectures(count, subject=subject)
-                            logger.info(f"✅ Telegram notification sent for {count} lectures in {subject}")
+                            sent_ok = notify_multiple_lectures(count, subject=subject)
+                            if sent_ok:
+                                logger.info(f"✅ Telegram notification sent for {count} lectures in {subject}")
+                            else:
+                                all_sent_ok = False
+                                logger.warning(f"⚠️ Telegram send failed for {count} lectures in {subject}")
                         
-                        # Mark all as notified
-                        for item_id in new_item_ids:
-                            _mark_notified(item_id)
+                        # Mark all as notified only if grouped send succeeded.
+                        if all_sent_ok:
+                            for item_id in new_item_ids:
+                                _mark_notified(item_id)
                 except Exception as e:
                     logger.error(f"❌ Failed to send Telegram notification: {e}")
             else:
@@ -469,15 +478,20 @@ async def manual_sync(request: Request) -> JSONResponse:
         
         # Send Telegram notifications ONLY for items that haven't been notified yet
         notifications_sent = 0
+        notifications_failed = 0
         if new_item_ids:
             try:
                 if len(new_item_ids) == 1 and files:
                     # Single lecture notification
                     subject = subject_map.get(new_item_ids[0], "بابەتی جیاواز")
-                    notify_new_lecture(files[0], subject=subject, base_url=BASE_URL)
-                    _mark_notified(new_item_ids[0])
-                    notifications_sent = 1
-                    logger.info(f"✅ Manual sync: Telegram sent for 1 lecture (ID: {new_item_ids[0]}, Subject: {subject})")
+                    sent_ok = notify_new_lecture(files[0], subject=subject, base_url=BASE_URL)
+                    if sent_ok:
+                        _mark_notified(new_item_ids[0])
+                        notifications_sent = 1
+                        logger.info(f"✅ Manual sync: Telegram sent for 1 lecture (ID: {new_item_ids[0]}, Subject: {subject})")
+                    else:
+                        notifications_failed = 1
+                        logger.warning(f"⚠️ Manual sync: Telegram failed for 1 lecture (ID: {new_item_ids[0]}, Subject: {subject})")
                 elif len(new_item_ids) > 1:
                     # Group lectures by subject
                     subjects_count = {}
@@ -486,21 +500,37 @@ async def manual_sync(request: Request) -> JSONResponse:
                         subjects_count[subject] = subjects_count.get(subject, 0) + 1
                     
                     # Send notification for each subject with multiple lectures
+                    all_sent_ok = True
                     for subject, count in subjects_count.items():
-                        notify_multiple_lectures(count, subject=subject)
-                        logger.info(f"✅ Manual sync: Telegram sent for {count} lectures in {subject}")
+                        sent_ok = notify_multiple_lectures(count, subject=subject)
+                        if sent_ok:
+                            logger.info(f"✅ Manual sync: Telegram sent for {count} lectures in {subject}")
+                        else:
+                            all_sent_ok = False
+                            logger.warning(f"⚠️ Manual sync: Telegram failed for {count} lectures in {subject}")
                     
-                    # Mark all as notified
-                    for item_id in new_item_ids:
-                        _mark_notified(item_id)
-                    notifications_sent = len(new_item_ids)
+                    # Mark all as notified only when grouped sends succeeded.
+                    if all_sent_ok:
+                        for item_id in new_item_ids:
+                            _mark_notified(item_id)
+                        notifications_sent = len(new_item_ids)
+                    else:
+                        notifications_failed = len(new_item_ids)
             except Exception as e:
                 logger.error(f"❌ Manual sync: Failed to send Telegram notification: {e}")
+                notifications_failed = len(new_item_ids)
         
         return JSONResponse({
             "success": True,
             "message": f"Synced {added} new file(s)",
-            "files": [f.name for f in files]
+            "files": [f.name for f in files],
+            "new_item_ids": new_item_ids,
+            "notifications_sent": notifications_sent,
+            "notifications_failed": notifications_failed,
+            "telegram": {
+                "bot_token_set": bool((os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()),
+                "target_id_set": bool((os.getenv("TELEGRAM_GROUP_ID") or os.getenv("TELEGRAM_CHAT_ID") or "").strip())
+            }
         })
     except AuthError as exc:
         logger.exception("Auth error during manual sync")
@@ -7348,6 +7378,7 @@ async def dashboard() -> HTMLResponse:
                     if (cachedAttendanceData && cachedAttendanceData.html) {{
                         document.getElementById('privateLoginArea').style.display = 'none';
                         document.getElementById('privateDataArea').style.display = 'block';
+                        switchPrivateSection('attendance');
                         renderAttendanceCards(cachedAttendanceData.html, cachedAttendanceData.fullName || attendanceUsername);
 
                         if (cachedResultAlerts) {{
@@ -7368,14 +7399,8 @@ async def dashboard() -> HTMLResponse:
                             document.getElementById('privateDataArea').style.display = 'block';
                             privateDataBootstrapped = true;
 
-                            const lastPrivateSection = safeStorage.getItem('lastPrivateSection');
-                            if (lastPrivateSection === 'result-alerts') {{
-                                switchPrivateSection('result-alerts');
-                            }} else if (lastPrivateSection === 'official-results') {{
-                                switchPrivateSection('official-results');
-                            }} else {{
-                                switchPrivateSection('attendance');
-                            }}
+                            // Product requirement: always open Attendance on session restore.
+                            switchPrivateSection('attendance');
                         }}
                     }}
 
@@ -7461,15 +7486,8 @@ async def dashboard() -> HTMLResponse:
                         document.getElementById('privateLoginArea').style.display = 'none';
                         document.getElementById('privateDataArea').style.display = 'block';
 
-                        // Restore last private section (attendance, result-alerts, or official-results)
-                        const lastPrivateSection = safeStorage.getItem('lastPrivateSection');
-                        if (lastPrivateSection === 'result-alerts') {{
-                            switchPrivateSection('result-alerts');
-                        }} else if (lastPrivateSection === 'official-results') {{
-                            switchPrivateSection('official-results');
-                        }} else {{
-                            switchPrivateSection('attendance');
-                        }}
+                        // Product requirement: always open Attendance after login.
+                        switchPrivateSection('attendance');
 
                         if (!prefetchState.attendanceReady) {{
                             document.getElementById('attendanceContent').innerHTML = `
@@ -7717,20 +7735,6 @@ async def dashboard() -> HTMLResponse:
                     // Show private data area with loading (unless silent refresh)
                     document.getElementById('privateLoginArea').style.display = 'none';
                     document.getElementById('privateDataArea').style.display = 'block';
-                    
-                    // Restore last private section (attendance, result-alerts, or official-results)
-                    const lastPrivateSection = safeStorage.getItem('lastPrivateSection');
-                    if (lastPrivateSection && !silentRefresh) {{
-                        // Delay slightly to ensure DOM is ready
-                        setTimeout(() => {{
-                            if (lastPrivateSection === 'result-alerts') {{
-                                switchPrivateSection('result-alerts');
-                            }} else if (lastPrivateSection === 'official-results') {{
-                                switchPrivateSection('official-results');
-                            }}
-                            // If 'attendance' or invalid, default to attendance (already active)
-                        }}, 100);
-                    }}
                 }}
                 
                 if (!silentRefresh) {{
