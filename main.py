@@ -1,6 +1,7 @@
 import asyncio
 import hmac
 import ipaddress
+import json
 import logging
 import os
 import re
@@ -102,6 +103,58 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/files", StaticFiles(directory=DOWNLOAD_DIR, html=False), name="files")
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
+
+# Cache official results snapshots to avoid hard failures when upstream is slow/unstable.
+OFFICIAL_RESULTS_CACHE_PATH = Path(os.getenv("OFFICIAL_RESULTS_CACHE_PATH", "data/official_results_cache.json"))
+OFFICIAL_RESULTS_CACHE_TTL_SECONDS = max(300, int(os.getenv("OFFICIAL_RESULTS_CACHE_TTL_SECONDS", "21600")))
+
+
+def _read_official_results_cache() -> dict:
+    try:
+        if not OFFICIAL_RESULTS_CACHE_PATH.exists():
+            return {}
+        return json.loads(OFFICIAL_RESULTS_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_official_results_cache(cache: dict) -> None:
+    try:
+        OFFICIAL_RESULTS_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        OFFICIAL_RESULTS_CACHE_PATH.write_text(json.dumps(cache), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _get_cached_official_results(student_id: str) -> dict:
+    cache = _read_official_results_cache()
+    entry = cache.get(student_id)
+    if not isinstance(entry, dict):
+        return {}
+
+    ts = int(entry.get("timestamp", 0) or 0)
+    if ts <= 0:
+        return {}
+
+    if (int(time.time()) - ts) > OFFICIAL_RESULTS_CACHE_TTL_SECONDS:
+        return {}
+
+    results = entry.get("results", [])
+    if not isinstance(results, list):
+        return {}
+
+    return {"results": results, "timestamp": ts}
+
+
+def _set_cached_official_results(student_id: str, results: list) -> None:
+    if not isinstance(results, list):
+        return
+    cache = _read_official_results_cache()
+    cache[student_id] = {
+        "timestamp": int(time.time()),
+        "results": results,
+    }
+    _write_official_results_cache(cache)
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon() -> FileResponse:
@@ -1148,11 +1201,19 @@ async def get_results(request: Request) -> JSONResponse:
                 "total_count": result.get('total_count', 0)
             })
         else:
+            error_msg = result.get('error', 'Failed to fetch results')
+            if 'expired' in error_msg.lower():
+                return JSONResponse({
+                    "success": False,
+                    "error": error_msg,
+                    "results": []
+                }, status_code=401)
             return JSONResponse({
-                "success": False,
-                "error": result.get('error', 'Failed to fetch results'),
-                "results": []
-            }, status_code=401 if 'expired' in result.get('error', '').lower() else 403)
+                "success": True,
+                "results": [],
+                "total_count": 0,
+                "warning": error_msg
+            })
     
     except Exception as exc:
         logger.exception("Error fetching results data: %s", str(exc))
@@ -1213,6 +1274,8 @@ async def get_official_results(request: Request) -> JSONResponse:
             }, status_code=400)
         
         logger.info("Fetching official results for student ID: %s", student_id)
+
+        cached_official = _get_cached_official_results(student_id)
         
         # Fetch results from official endpoint
         official_endpoint = f"https://tempapp-su.awrosoft.com/University/StudentResult/List?studentId={student_id}"
@@ -2056,17 +2119,41 @@ async def get_official_results(request: Request) -> JSONResponse:
         result = await asyncio.to_thread(fetch_official_results)
         
         if result['success']:
+            _set_cached_official_results(student_id, result.get('results', []))
             return JSONResponse({
                 "success": True,
                 "results": result['results'],
                 "total_count": result.get('total_count', 0)
             })
         else:
+            error_msg = result.get('error', 'Failed to fetch official results')
+
+            # Graceful fallback: return recently cached official results if available.
+            if cached_official.get('results'):
+                return JSONResponse({
+                    "success": True,
+                    "results": cached_official['results'],
+                    "total_count": len(cached_official['results']),
+                    "warning": error_msg,
+                    "source": "cache"
+                })
+
+            # Session-related errors should still force re-login.
+            if 'expired' in error_msg.lower():
+                return JSONResponse({
+                    "success": False,
+                    "error": error_msg,
+                    "results": []
+                }, status_code=401)
+
+            # Avoid HTTP 500/401 hard-fail screens for temporary upstream issues.
             return JSONResponse({
-                "success": False,
-                "error": result.get('error', 'Failed to fetch official results'),
-                "results": []
-            }, status_code=401 if 'expired' in result.get('error', '').lower() or 'unauthorized' in result.get('error', '').lower() else 500)
+                "success": True,
+                "results": [],
+                "total_count": 0,
+                "warning": error_msg,
+                "source": "live"
+            })
     
     except Exception as exc:
         logger.exception("Error fetching official results data: %s", str(exc))
