@@ -6116,7 +6116,7 @@ async def dashboard() -> HTMLResponse:
                 </button>
                 <button class="zone-tab" onclick="switchZone('private')" id="privateTab">
                     <i class="fas fa-user-shield"></i>
-                    <span class="tab-label">Attendance</span>
+                    <span class="tab-label">Student Portal</span>
                     <span class="tab-meta">(Private)</span>
                 </button>
             </div>
