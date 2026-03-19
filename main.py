@@ -5145,7 +5145,7 @@ async def dashboard() -> HTMLResponse:
             .logout-confirm-modal .modal-content {{
                 max-width: 460px;
                 width: calc(100% - 2rem);
-                border: 1px solid rgba(239, 68, 68, 0.35);
+                border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
                 box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
             }}
 
@@ -5163,9 +5163,9 @@ async def dashboard() -> HTMLResponse:
                 align-items: center;
                 justify-content: center;
                 font-size: 1.9rem;
-                color: #ef4444;
-                background: radial-gradient(circle at center, rgba(239, 68, 68, 0.22), rgba(239, 68, 68, 0.08));
-                border: 1px solid rgba(239, 68, 68, 0.3);
+                color: var(--accent);
+                background: radial-gradient(circle at center, color-mix(in srgb, var(--accent) 24%, transparent), color-mix(in srgb, var(--accent) 10%, transparent));
+                border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
             }}
 
             .logout-confirm-body h3 {{
@@ -5214,14 +5214,14 @@ async def dashboard() -> HTMLResponse:
             }}
 
             .logout-confirm-btn {{
-                border-color: rgba(239, 68, 68, 0.45);
-                background: linear-gradient(135deg, #ef4444, #dc2626);
+                border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+                background: linear-gradient(135deg, var(--accent), var(--success));
                 color: #fff;
             }}
 
             .logout-confirm-btn:hover {{
                 transform: translateY(-1px);
-                box-shadow: 0 12px 24px rgba(239, 68, 68, 0.35);
+                box-shadow: 0 12px 24px var(--accent-glow);
             }}
             
             .attendance-content-wrapper {{
