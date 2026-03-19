@@ -16,8 +16,12 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Telegram Configuration
+# Support both TELEGRAM_GROUP_ID and TELEGRAM_CHAT_ID to match different deploy docs.
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_GROUP_ID = os.getenv("TELEGRAM_GROUP_ID", "").strip()
+TELEGRAM_GROUP_ID = (
+    os.getenv("TELEGRAM_GROUP_ID", "").strip()
+    or os.getenv("TELEGRAM_CHAT_ID", "").strip()
+)
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else ""
 
 
