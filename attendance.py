@@ -7,10 +7,13 @@ Uses in-memory session cache for performance
 import asyncio
 import time
 import secrets
+import json
+import os
 import requests
 from bs4 import BeautifulSoup
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
+from pathlib import Path
 import pytz
 from auth import AuthClient, AuthConfig
 from student_info import get_student_info
@@ -18,21 +21,82 @@ from student_info import get_student_info
 class SessionManager:
     """Fast in-memory session management with TTL"""
     
-    def __init__(self, session_ttl_minutes: int = 30):
+    def __init__(self, session_ttl_minutes: int = 30, persist_path: str = "data/attendance_sessions.json"):
         self.sessions: Dict[str, Dict[str, Any]] = {}
         self.session_ttl = timedelta(minutes=session_ttl_minutes)
+        self.persist_path = Path(persist_path)
+        self.iraq_tz = pytz.timezone('Asia/Baghdad')
+        self._load_sessions()
+
+    def _now(self) -> datetime:
+        return datetime.now(self.iraq_tz)
+
+    def _serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat()
+
+    def _deserialize_datetime(self, value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            dt = datetime.fromisoformat(value)
+            if dt.tzinfo is None:
+                return self.iraq_tz.localize(dt)
+            return dt.astimezone(self.iraq_tz)
+        return self._now()
+
+    def _load_sessions(self):
+        if not self.persist_path.exists():
+            return
+        try:
+            raw = self.persist_path.read_text(encoding='utf-8')
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return
+            loaded: Dict[str, Dict[str, Any]] = {}
+            for token, session in data.items():
+                if not isinstance(session, dict):
+                    continue
+                loaded[token] = {
+                    'student_id': str(session.get('student_id', '')),
+                    'cookies': dict(session.get('cookies', {}) or {}),
+                    'username': str(session.get('username', '')),
+                    'created_at': self._deserialize_datetime(session.get('created_at')),
+                    'last_accessed': self._deserialize_datetime(session.get('last_accessed')),
+                }
+            self.sessions = loaded
+            self.cleanup_expired_sessions()
+        except Exception:
+            # If session cache is malformed, continue with an empty cache.
+            self.sessions = {}
+
+    def _save_sessions(self):
+        try:
+            self.persist_path.parent.mkdir(parents=True, exist_ok=True)
+            serializable: Dict[str, Dict[str, Any]] = {}
+            for token, session in self.sessions.items():
+                serializable[token] = {
+                    'student_id': session.get('student_id', ''),
+                    'cookies': session.get('cookies', {}),
+                    'username': session.get('username', ''),
+                    'created_at': self._serialize_datetime(session.get('created_at', self._now())),
+                    'last_accessed': self._serialize_datetime(session.get('last_accessed', self._now())),
+                }
+            self.persist_path.write_text(json.dumps(serializable), encoding='utf-8')
+        except Exception:
+            pass
         
     def create_session(self, student_id: str, cookies: Dict, username: str) -> str:
         """Create a new session and return session token"""
         session_token = secrets.token_urlsafe(32)
-        iraq_tz = pytz.timezone('Asia/Baghdad')
+        now = self._now()
         self.sessions[session_token] = {
             'student_id': student_id,
             'cookies': cookies,
             'username': username,
-            'created_at': datetime.now(iraq_tz),
-            'last_accessed': datetime.now(iraq_tz)
+            'created_at': now,
+            'last_accessed': now
         }
+        self._save_sessions()
         return session_token
     
     def get_session(self, session_token: str) -> Optional[Dict[str, Any]]:
@@ -41,34 +105,39 @@ class SessionManager:
             return None
         
         session = self.sessions[session_token]
-        iraq_tz = pytz.timezone('Asia/Baghdad')
+        now = self._now()
+        last_accessed = self._deserialize_datetime(session.get('last_accessed'))
         
-        # Check if expired
-        if datetime.now(iraq_tz) - session['created_at'] > self.session_ttl:
+        # Sliding expiration: keep active sessions alive while the user keeps using the app.
+        if now - last_accessed > self.session_ttl:
             del self.sessions[session_token]
+            self._save_sessions()
             return None
         
         # Update last accessed
-        session['last_accessed'] = datetime.now(iraq_tz)
+        session['last_accessed'] = now
+        self._save_sessions()
         return session
     
     def delete_session(self, session_token: str) -> bool:
         """Delete a session"""
         if session_token in self.sessions:
             del self.sessions[session_token]
+            self._save_sessions()
             return True
         return False
     
     def cleanup_expired_sessions(self):
         """Remove expired sessions (called periodically)"""
-        iraq_tz = pytz.timezone('Asia/Baghdad')
-        now = datetime.now(iraq_tz)
+        now = self._now()
         expired_tokens = [
             token for token, session in self.sessions.items()
-            if now - session['created_at'] > self.session_ttl
+            if now - self._deserialize_datetime(session.get('last_accessed')) > self.session_ttl
         ]
         for token in expired_tokens:
             del self.sessions[token]
+        if expired_tokens:
+            self._save_sessions()
 
 
 class AttendanceService:
@@ -81,7 +150,10 @@ class AttendanceService:
     REQUEST_TIMEOUT = 15  # seconds
     
     def __init__(self):
-        self.session_manager = SessionManager(session_ttl_minutes=30)
+        ttl_minutes = int(os.getenv('ATTENDANCE_SESSION_TTL_MINUTES', '10080'))  # 7 days default
+        ttl_minutes = max(30, ttl_minutes)
+        persist_path = os.getenv('ATTENDANCE_SESSION_STORE', 'data/attendance_sessions.json')
+        self.session_manager = SessionManager(session_ttl_minutes=ttl_minutes, persist_path=persist_path)
     
     async def authenticate_user(self, username: str, password: str) -> Dict[str, Any]:
         """

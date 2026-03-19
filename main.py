@@ -956,6 +956,7 @@ async def attendance_login(request: Request) -> JSONResponse:
 
         username = str(payload.get("username", "")).strip()
         password = str(payload.get("password", ""))
+        remember_me = bool(payload.get("remember_me", False))
 
         # Get real client IP
         client_ip = get_real_client_ip(request)
@@ -993,13 +994,14 @@ async def attendance_login(request: Request) -> JSONResponse:
 
             # Browsers reject Secure cookies on http://localhost.
             is_secure_request = request.url.scheme == "https"
+            cookie_max_age = 7 * 24 * 60 * 60 if remember_me else 60 * 60
             
             # ANDROID FIX: Set HTTP cookie for session persistence
             # Using explicit cookie settings for maximum Android compatibility
             response.set_cookie(
                 key="session_token",
                 value=result['session_token'],
-                max_age=3600,  # 1 hour - longer timeout for Android stability
+                max_age=cookie_max_age,
                 path="/",
                 domain=None,  # Prevents subdomain mismatch issues
                 secure=is_secure_request,
@@ -7629,7 +7631,7 @@ async def dashboard() -> HTMLResponse:
                 try {{
                     var result = await apiFetchJson('/api/attendance/login', {{
                         method: 'POST',
-                        body: JSON.stringify({{ username: username, password: password }})
+                        body: JSON.stringify({{ username: username, password: password, remember_me: rememberMe }})
                     }}, 1, 25000);
                     
                     if (result.success) {{
