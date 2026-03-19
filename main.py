@@ -6593,7 +6593,7 @@ async def dashboard() -> HTMLResponse:
                                 await new Promise(r => setTimeout(r, 350 * (attempt + 1)));
                                 continue;
                             }}
-                            throw new Error('Network timeout. Please check your connection and try again.');
+                            throw new Error('Request timed out. The server may be waking up or the connection may be slow. Please wait a moment and try again.');
                         }}
                         if (attempt < retries) {{
                             await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
@@ -7632,7 +7632,7 @@ async def dashboard() -> HTMLResponse:
                     var result = await apiFetchJson('/api/attendance/login', {{
                         method: 'POST',
                         body: JSON.stringify({{ username: username, password: password, remember_me: rememberMe }})
-                    }}, 1, 25000);
+                    }}, 2, 90000);
                     
                     if (result.success) {{
                         // Save session token
