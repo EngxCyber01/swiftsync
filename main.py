@@ -7542,8 +7542,10 @@ async def dashboard() -> HTMLResponse:
                     document.getElementById('privateZone').classList.add('active');
                     safeStorage.setItem('lastActiveZone', 'private');
 
-                    // Avoid flashing the login form while session restore is in progress.
-                    showPrivateRestoreState();
+                    // Avoid flashing the login form only when an active private session is expected.
+                    if (safeStorage.getItem('attendance_session_active') === 'true') {{
+                        showPrivateRestoreState();
+                    }}
                     
                     // Check if user has a saved session
                     checkAttendanceSession();
@@ -7628,8 +7630,10 @@ async def dashboard() -> HTMLResponse:
             async function checkAttendanceSession() {{
                 // Cookie-first restore: rely on server-side session cookie as source of truth.
                 if (!attendanceSessionToken) {{
-                    attendanceSessionToken = 'cookie-session';
-                    attendanceUsername = safeStorage.getItem('attendance_username') || safeStorage.getItem('attendance_saved_username');
+                    if (safeStorage.getItem('attendance_session_active') === 'true') {{
+                        attendanceSessionToken = 'cookie-session';
+                        attendanceUsername = safeStorage.getItem('attendance_username') || safeStorage.getItem('attendance_saved_username');
+                    }}
                 }}
 
                 // For token-based fallback sessions, keep client-side expiry check.
@@ -8111,6 +8115,13 @@ async def dashboard() -> HTMLResponse:
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
                             return;
                         }}
+
+                        if (String(error && error.message || '').includes('HTTP 401')) {{
+                            logoutAttendance(true);
+                            showNotification('Your session has ended. Please login again.', 'error');
+                            return false;
+                        }}
+
                         document.getElementById('attendanceContent').innerHTML = `
                         <div class="empty-state">
                             <i class="fas fa-exclamation-triangle"></i>
@@ -8263,6 +8274,13 @@ async def dashboard() -> HTMLResponse:
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
                             return;
                         }}
+
+                        if (String(error && error.message || '').includes('HTTP 401')) {{
+                            logoutAttendance(true);
+                            showNotification('Your session has ended. Please login again.', 'error');
+                            return false;
+                        }}
+
                         document.getElementById('resultsContent').innerHTML = `
                         <div class="empty-state">
                             <i class="fas fa-exclamation-triangle"></i>
@@ -8556,6 +8574,13 @@ async def dashboard() -> HTMLResponse:
                         if (attendanceSessionToken !== requestToken || getPrivateOwnerKey() !== requestOwnerKey) {{
                             return;
                         }}
+
+                        if (String(error && error.message || '').includes('HTTP 401')) {{
+                            logoutAttendance(true);
+                            showNotification('Your session has ended. Please login again.', 'error');
+                            return false;
+                        }}
+
                         console.error('Network error while loading official results:', error);
                         // Same rule: only show error screen if we have no cached
                         // results yet; otherwise keep the last good data visible.
