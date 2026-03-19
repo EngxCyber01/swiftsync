@@ -6220,7 +6220,7 @@ async def dashboard() -> HTMLResponse:
                             </div>
                             <label class="remember-me">
                                 <input type="checkbox" id="rememberMe" />
-                                <span>Remember username on this device</span>
+                                <span>Keep me signed in on this device</span>
                             </label>
                             <button type="submit" class="login-submit-btn" id="loginSubmitBtn">
                                 <i class="fas fa-sign-in-alt"></i>
@@ -7096,6 +7096,9 @@ async def dashboard() -> HTMLResponse:
                 if (lastPrivateSection && (lastPrivateSection === 'result-alerts' || lastPrivateSection === 'official-results')) {{
                     // Will be restored when private mode is activated by checkAttendanceSession
                 }}
+
+                // Restore remembered login values for the private-zone login form.
+                applySavedLoginPreference();
                 
                 // Lectures is already active by default in HTML
             }});
@@ -7411,6 +7414,21 @@ async def dashboard() -> HTMLResponse:
                 }}
                 return false;
             }}
+
+            function applySavedLoginPreference() {{
+                var savedUsername = safeStorage.getItem('attendance_saved_username');
+                var rememberEnabled = safeStorage.getItem('attendance_remember_enabled') === 'true';
+                var usernameInput = document.getElementById('attendanceUsername');
+                var rememberCheckbox = document.getElementById('rememberMe');
+
+                if (usernameInput && savedUsername) {{
+                    usernameInput.value = savedUsername;
+                }}
+
+                if (rememberCheckbox) {{
+                    rememberCheckbox.checked = rememberEnabled && !!savedUsername;
+                }}
+            }}
             
             // PWA install prompt
             var deferredPrompt = null;
@@ -7502,6 +7520,17 @@ async def dashboard() -> HTMLResponse:
             // ===================================
             
             async function checkAttendanceSession() {{
+                // Rebuild cookie-backed session context after hard refresh when user opted in.
+                if (!attendanceSessionToken) {{
+                    var rememberEnabled = safeStorage.getItem('attendance_remember_enabled') === 'true';
+                    var sessionActive = safeStorage.getItem('attendance_session_active') === 'true';
+
+                    if (rememberEnabled && sessionActive && !isSessionExpired()) {{
+                        attendanceSessionToken = 'cookie-session';
+                        attendanceUsername = safeStorage.getItem('attendance_username') || safeStorage.getItem('attendance_saved_username');
+                    }}
+                }}
+
                 // Check if session is expired
                 if (attendanceSessionToken && isSessionExpired()) {{
                     console.log('Session expired, clearing...');
@@ -7511,6 +7540,7 @@ async def dashboard() -> HTMLResponse:
                     attendanceSessionToken = null;
                     safeStorage.removeItem('attendance_session_active');
                     safeStorage.removeItem('attendance_session_timestamp');
+                    safeStorage.removeItem('attendance_username');
                 }}
                 
                 if (attendanceSessionToken) {{
@@ -7557,6 +7587,7 @@ async def dashboard() -> HTMLResponse:
                     // Show login form
                     document.getElementById('privateLoginArea').style.display = 'block';
                     document.getElementById('privateDataArea').style.display = 'none';
+                    applySavedLoginPreference();
                 }}
             }}
             
@@ -7618,8 +7649,14 @@ async def dashboard() -> HTMLResponse:
                         // Security: store only username preference, never password.
                         if (rememberMe) {{
                             safeStorage.setItem('attendance_saved_username', username);
+                            safeStorage.setItem('attendance_remember_enabled', 'true');
+                            safeStorage.setItem('attendance_session_active', 'true');
+                            safeStorage.setItem('attendance_username', result.username || username);
                         }} else {{
                             safeStorage.removeItem('attendance_saved_username');
+                            safeStorage.removeItem('attendance_remember_enabled');
+                            safeStorage.removeItem('attendance_session_active');
+                            safeStorage.removeItem('attendance_username');
                         }}
 
                         // Fetch ALL private data during login loading, so tabs are instant after login.
@@ -8014,8 +8051,10 @@ async def dashboard() -> HTMLResponse:
                 safeStorage.removeItem('attendance_session_active');
                 safeStorage.removeItem('attendance_username');
                 safeStorage.removeItem('attendance_credentials');
-                safeStorage.removeItem('attendance_saved_username');
                 safeStorage.removeItem('attendance_session_timestamp');
+                if (safeStorage.getItem('attendance_remember_enabled') !== 'true') {{
+                    safeStorage.removeItem('attendance_saved_username');
+                }}
                 privateDataBootstrapped = false;
                 
                 // Clear all cached private data
@@ -8023,6 +8062,7 @@ async def dashboard() -> HTMLResponse:
                 
                 // Reset form
                 document.getElementById('attendanceLoginForm').reset();
+                applySavedLoginPreference();
                 document.getElementById('loginSubmitBtn').disabled = false;
                 document.getElementById('loginSubmitBtn').classList.remove('loading');
                 document.getElementById('loginSubmitBtn').innerHTML = '<i class="fas fa-sign-in-alt"></i><span>Login Securely</span>';
