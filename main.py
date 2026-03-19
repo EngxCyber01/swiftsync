@@ -27,7 +27,7 @@ from summarizer import summarize_single_lecture, summarize_all_lectures, Summari
 from attendance import attendance_service
 from results import results_service
 import database as db
-from telegram_notifier import notify_new_lecture, notify_multiple_lectures
+from telegram_notifier import notify_new_lecture, notify_multiple_lectures, test_telegram_connection
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO)
@@ -514,6 +514,36 @@ async def manual_sync(request: Request) -> JSONResponse:
             "success": False,
             "error": str(exc)
         }, status_code=500)
+
+
+@app.post("/api/telegram/test")
+async def test_telegram_notification(request: Request, admin_key: str = "") -> JSONResponse:
+    """Admin-only endpoint to send a Telegram test message immediately."""
+    if not _is_valid_admin_key(admin_key):
+        return JSONResponse({"success": False, "error": "Unauthorized"}, status_code=401)
+
+    token_set = bool((os.getenv("TELEGRAM_BOT_TOKEN") or "").strip())
+    target_set = bool((os.getenv("TELEGRAM_GROUP_ID") or os.getenv("TELEGRAM_CHAT_ID") or "").strip())
+
+    ok = test_telegram_connection()
+    if ok:
+        return JSONResponse({
+            "success": True,
+            "message": "Telegram test sent successfully.",
+            "config": {
+                "bot_token_set": token_set,
+                "target_id_set": target_set,
+            },
+        })
+
+    return JSONResponse({
+        "success": False,
+        "error": "Telegram test failed. Check Render logs and bot/chat permissions.",
+        "config": {
+            "bot_token_set": token_set,
+            "target_id_set": target_set,
+        },
+    }, status_code=500)
 
 
 @app.post("/api/admin/upload-data")
