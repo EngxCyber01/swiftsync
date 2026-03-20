@@ -3,26 +3,14 @@ Telegram Bot Notifier for SwiftSync
 Sends notifications to Telegram group when new lectures are uploaded
 """
 import logging
-import os
 import requests
 from datetime import datetime
 import pytz
 from typing import Optional
 from pathlib import Path
-from dotenv import load_dotenv
-
-load_dotenv()
+from telegram_config import get_telegram_settings, redact_secrets
 
 logger = logging.getLogger(__name__)
-
-# Telegram Configuration
-# Support both TELEGRAM_GROUP_ID and TELEGRAM_CHAT_ID to match different deploy docs.
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_GROUP_ID = (
-    os.getenv("TELEGRAM_GROUP_ID", "").strip()
-    or os.getenv("TELEGRAM_CHAT_ID", "").strip()
-)
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}" if TELEGRAM_BOT_TOKEN else ""
 
 
 def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
@@ -37,13 +25,14 @@ def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
         True if message was sent successfully, False otherwise
     """
     try:
-        if not TELEGRAM_BOT_TOKEN or not TELEGRAM_GROUP_ID:
+        settings = get_telegram_settings()
+        if not settings.configured:
             logger.warning("Telegram notification skipped: missing TELEGRAM_BOT_TOKEN or TELEGRAM_GROUP_ID")
             return False
 
-        url = f"{TELEGRAM_API_URL}/sendMessage"
+        url = f"{settings.api_url}/sendMessage"
         payload = {
-            "chat_id": TELEGRAM_GROUP_ID,
+            "chat_id": settings.target_id,
             "text": message,
             "disable_web_page_preview": False
         }
@@ -58,10 +47,10 @@ def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
         return True
         
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to send Telegram notification: {e}")
+        logger.error("Failed to send Telegram notification: %s", redact_secrets(str(e)))
         return False
     except Exception as e:
-        logger.exception(f"Unexpected error sending Telegram notification: {e}")
+        logger.exception("Unexpected error sending Telegram notification: %s", redact_secrets(str(e)))
         return False
 
 

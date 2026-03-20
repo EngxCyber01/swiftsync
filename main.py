@@ -29,6 +29,7 @@ from attendance import attendance_service
 from results import results_service
 import database as db
 from telegram_notifier import notify_new_lecture, notify_multiple_lectures, test_telegram_connection
+from telegram_config import telegram_status
 
 load_dotenv(override=True)
 logging.basicConfig(level=logging.INFO)
@@ -580,10 +581,7 @@ async def manual_sync(request: Request) -> JSONResponse:
             "new_item_ids": new_item_ids,
             "notifications_sent": notifications_sent,
             "notifications_failed": notifications_failed,
-            "telegram": {
-                "bot_token_set": bool((os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()),
-                "target_id_set": bool((os.getenv("TELEGRAM_GROUP_ID") or os.getenv("TELEGRAM_CHAT_ID") or "").strip())
-            }
+            "telegram": telegram_status()
         })
     except AuthError as exc:
         logger.exception("Auth error during manual sync")
@@ -605,27 +603,20 @@ async def test_telegram_notification(request: Request, admin_key: str = "") -> J
     if not _is_valid_admin_key(admin_key):
         return JSONResponse({"success": False, "error": "Unauthorized"}, status_code=401)
 
-    token_set = bool((os.getenv("TELEGRAM_BOT_TOKEN") or "").strip())
-    target_set = bool((os.getenv("TELEGRAM_GROUP_ID") or os.getenv("TELEGRAM_CHAT_ID") or "").strip())
+    status = telegram_status()
 
     ok = test_telegram_connection()
     if ok:
         return JSONResponse({
             "success": True,
             "message": "Telegram test sent successfully.",
-            "config": {
-                "bot_token_set": token_set,
-                "target_id_set": target_set,
-            },
+            "config": status,
         })
 
     return JSONResponse({
         "success": False,
         "error": "Telegram test failed. Check Render logs and bot/chat permissions.",
-        "config": {
-            "bot_token_set": token_set,
-            "target_id_set": target_set,
-        },
+        "config": status,
     }, status_code=500)
 
 
@@ -1047,7 +1038,9 @@ async def attendance_login(request: Request) -> JSONResponse:
 
             # Browsers reject Secure cookies on http://localhost.
             is_secure_request = request.url.scheme == "https"
-            cookie_max_age = 7 * 24 * 60 * 60 if remember_me else 60 * 60
+            # Keep login active across app/browser restarts until explicit logout.
+            # The remember checkbox now controls username prefill only on the client.
+            cookie_max_age = 7 * 24 * 60 * 60
             
             # ANDROID FIX: Set HTTP cookie for session persistence
             # Using explicit cookie settings for maximum Android compatibility
@@ -7757,17 +7750,17 @@ async def dashboard() -> HTMLResponse:
                         // Set session timestamp (7 days expiration)
                         updateSessionTimestamp();
                         
-                        // Security: store only username preference, never password.
+                        // Keep authenticated session markers for reliable restore after app close/reopen.
+                        safeStorage.setItem('attendance_session_active', 'true');
+                        safeStorage.setItem('attendance_username', result.username || username);
+
+                        // Remember-me controls only username prefill (never password/session).
                         if (rememberMe) {{
                             safeStorage.setItem('attendance_saved_username', username);
                             safeStorage.setItem('attendance_remember_enabled', 'true');
-                            safeStorage.setItem('attendance_session_active', 'true');
-                            safeStorage.setItem('attendance_username', result.username || username);
                         }} else {{
                             safeStorage.removeItem('attendance_saved_username');
-                            safeStorage.removeItem('attendance_remember_enabled');
-                            safeStorage.removeItem('attendance_session_active');
-                            safeStorage.removeItem('attendance_username');
+                            safeStorage.setItem('attendance_remember_enabled', 'false');
                         }}
 
                         // Fetch ALL private data during login loading, so tabs are instant after login.
@@ -8541,13 +8534,21 @@ async def dashboard() -> HTMLResponse:
                         // Refresh session timestamp on successful data load
                         updateSessionTimestamp();
                         
-                        // Cache the data for instant future loads
-                        cachedOfficialResults = result.results || [];
-                        cachedOfficialResultsAt = Date.now();
-                        persistPrivateCache('official_results', cachedOfficialResults);
-                        
-                        // Render official results
-                        renderOfficialResults(cachedOfficialResults);
+                        const fetchedOfficialResults = Array.isArray(result.results) ? result.results : [];
+
+                        // Avoid replacing valid data with a transient empty payload.
+                        if (fetchedOfficialResults.length === 0 && cachedOfficialResults && cachedOfficialResults.length > 0) {{
+                            console.warn('Official results response was empty; keeping last known results.');
+                            renderOfficialResults(cachedOfficialResults);
+                        }} else {{
+                            // Cache the data for instant future loads
+                            cachedOfficialResults = fetchedOfficialResults;
+                            cachedOfficialResultsAt = Date.now();
+                            persistPrivateCache('official_results', cachedOfficialResults);
+
+                            // Render official results
+                            renderOfficialResults(cachedOfficialResults);
+                        }}
                         loadedSuccessfully = true;
                     }} else {{
                         // Session expired or error
@@ -8917,12 +8918,8 @@ async def dashboard() -> HTMLResponse:
                     console.error('❌ localStorage test failed:', e);
                 }}
                 
-                // Always start in logged-out mode on page load.
-                attendanceSessionToken = null;
-                safeStorage.removeItem('attendance_session_active');
-                safeStorage.removeItem('attendance_username');
-                safeStorage.removeItem('attendance_session_timestamp');
-                console.log('ℹ️ Fresh login required on each page load');
+                // Restore existing session if available; do not force logout on reload.
+                checkAttendanceSession();
             }});
         </script>
         
