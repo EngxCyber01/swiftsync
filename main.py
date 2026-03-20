@@ -2032,11 +2032,12 @@ async def get_official_results(request: Request) -> JSONResponse:
                                 t_norm = title.lower()
                                 is_retake = ('retake' in t_norm) or ('اعادة' in t_norm) or ('إعادة' in t_norm)
 
-                                # Only keep rows that can be placed in a real semester
+                                # Be tolerant: keep rows even if semester/year parsing is ambiguous.
+                                # Some student portals return valid rows without canonical semester labels.
                                 if not year:
-                                    continue
+                                    year = 'Academic Year Unknown'
                                 if not sem or sem == 'Unknown Semester':
-                                    continue
+                                    sem = 'General Results'
 
                                 if is_retake:
                                     final_results.append(row)
@@ -8677,8 +8678,12 @@ async def dashboard() -> HTMLResponse:
 
                     return true;
                 }});
+
+                // If strict client-side filtering removes everything, fall back to raw API rows
+                // so students still see their portal data.
+                const workingResults = filteredResults.length > 0 ? filteredResults : (results || []);
                 
-                filteredResults.forEach((result) => {{
+                workingResults.forEach((result) => {{
                     const academicYear = result.AcademicYear || result.academicYear || result.Year || result.year || '';
                     const semesterName = result.SemesterName || result.Semester || result.semester || 'Unknown Semester';
                     const semesterLabel = result.SemesterLabel || result.semesterLabel || '';
@@ -8689,11 +8694,10 @@ async def dashboard() -> HTMLResponse:
                     // Prefer label-derived semester when available; upstream semesterName can be inconsistent.
                     const sem = semFromLabel || ((semesterName && semesterName !== 'Unknown Semester') ? semesterName : semesterName);
 
-                    // STRICT: show ONLY "YYYY-YYYY <Semester>" sections.
-                    // Never show year-only or "Result of..." groups.
-                    if (!year) return;
-                    if (!sem || sem === 'Unknown Semester') return;
-                    const semesterKey = `${{year}} ${{sem}}`;
+                    // Tolerant grouping: do not drop valid rows when year/semester labels are missing.
+                    const normalizedYear = year || 'Academic Year Unknown';
+                    const normalizedSem = (!sem || sem === 'Unknown Semester') ? 'General Results' : sem;
+                    const semesterKey = `${{normalizedYear}} ${{normalizedSem}}`;
                     
                     if (!resultsBySemester[semesterKey]) {{
                         resultsBySemester[semesterKey] = [];
