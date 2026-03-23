@@ -90,9 +90,23 @@ else:
         "http://127.0.0.1:8000",
     ]
 
+# Optional regex-based origin allowlist for multi-domain deployments.
+# This keeps localhost working and supports common hosted frontends.
+_allowed_origin_regex_env = os.getenv("ALLOWED_ORIGIN_REGEX", "").strip()
+if _allowed_origin_regex_env:
+    _allowed_origin_regex = _allowed_origin_regex_env
+else:
+    _allowed_origin_regex = (
+        r"^https://([a-z0-9-]+\.)?onrender\.com$"
+        r"|^https://([a-z0-9-]+\.)?up\.railway\.app$"
+        r"|^http://localhost(:\d+)?$"
+        r"|^http://127\.0\.0\.1(:\d+)?$"
+    )
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
+    allow_origin_regex=_allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1037,7 +1051,9 @@ async def attendance_login(request: Request) -> JSONResponse:
             })
 
             # Browsers reject Secure cookies on http://localhost.
-            is_secure_request = request.url.scheme == "https"
+            # In production behind reverse proxies, HTTPS may come via X-Forwarded-Proto.
+            forwarded_proto = (request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower())
+            is_secure_request = request.url.scheme == "https" or forwarded_proto == "https"
             # Keep login active across app/browser restarts until explicit logout.
             # The remember checkbox now controls username prefill only on the client.
             cookie_max_age = 7 * 24 * 60 * 60
@@ -7085,7 +7101,10 @@ async def dashboard() -> HTMLResponse:
                         showNotification(`Sync failed: ${{result.error}}`, 'error');
                     }}
                 }} catch (error) {{
-                    showNotification(`Error: ${{error.message}}`, 'error');
+                    const message = (error && error.message === 'Failed to fetch')
+                        ? 'Network/CORS issue. Open the same deployed domain for frontend and API, then clear site data and retry.'
+                        : `Error: ${{error.message}}`;
+                    showNotification(message, 'error');
                 }} finally {{
                     btn.disabled = false;
                     icon.classList.remove('fa-spin');
@@ -7811,7 +7830,10 @@ async def dashboard() -> HTMLResponse:
                         submitBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i><span>Login Securely</span>';
                     }}
                 }} catch (error) {{
-                    showNotification(`Login error: ${{error.message}}`, 'error');
+                    const message = (error && error.message === 'Failed to fetch')
+                        ? 'Login network error (likely CORS/domain mismatch). Open the same deployed domain and retry.'
+                        : `Login error: ${{error.message}}`;
+                    showNotification(message, 'error');
 
                     // Safety: ensure stale private caches aren't kept after failed login
                     clearPrivateCaches();
