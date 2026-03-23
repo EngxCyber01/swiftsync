@@ -63,6 +63,27 @@ def init_security_tables():
                 action_taken TEXT
             )
         """)
+
+        # Create identity blacklist table (username/device fingerprint)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS identity_blacklist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                identity_type TEXT NOT NULL,
+                identity_value TEXT NOT NULL,
+                reason TEXT,
+                blocked_at TEXT NOT NULL,
+                UNIQUE(identity_type, identity_value)
+            )
+        """)
+
+        # Create system settings table (small key-value store for admin-managed flags/text).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT,
+                updated_at TEXT NOT NULL
+            )
+        """)
         
         # Create index for faster IP lookups
         cursor.execute("""
@@ -73,6 +94,16 @@ def init_security_tables():
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_visitor_logs_ip 
             ON visitor_logs(ip_address)
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_identity_blacklist_type_value
+            ON identity_blacklist(identity_type, identity_value)
+        """)
+
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_system_settings_updated_at
+            ON system_settings(updated_at)
         """)
         
         conn.commit()
@@ -122,6 +153,128 @@ def unblock_ip(ip_address: str):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM blacklist WHERE ip_address = ?", (ip_address,))
+        conn.commit()
+
+
+def block_identity(identity_type: str, identity_value: str, reason: str = "Security block"):
+    """Block an identity value (e.g., username or device_fingerprint)."""
+    normalized_type = (identity_type or "").strip().lower()
+    normalized_value = (identity_value or "").strip().lower()
+    if not normalized_type or not normalized_value:
+        return
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO identity_blacklist (identity_type, identity_value, reason, blocked_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                normalized_type,
+                normalized_value,
+                reason,
+                datetime.now(pytz.timezone('Asia/Baghdad')).isoformat(),
+            ),
+        )
+        conn.commit()
+
+
+def is_identity_blocked(identity_type: str, identity_value: str) -> bool:
+    """Check if an identity value is currently blocked."""
+    normalized_type = (identity_type or "").strip().lower()
+    normalized_value = (identity_value or "").strip().lower()
+    if not normalized_type or not normalized_value:
+        return False
+
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT 1
+                FROM identity_blacklist
+                WHERE identity_type = ? AND identity_value = ?
+                LIMIT 1
+                """,
+                (normalized_type, normalized_value),
+            )
+            return cursor.fetchone() is not None
+    except Exception as e:
+        print(f"Error checking identity blacklist: {e}")
+        return False
+
+
+def get_recent_usernames_by_ip(ip_address: str, limit: int = 10) -> List[str]:
+    """Return recent non-empty usernames observed from an IP."""
+    if not ip_address:
+        return []
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT DISTINCT username
+            FROM visitor_logs
+            WHERE ip_address = ?
+              AND username IS NOT NULL
+              AND TRIM(username) != ''
+              AND LOWER(TRIM(username)) NOT IN ('n/a', 'guest', 'unknown')
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (ip_address, limit),
+        )
+        rows = cursor.fetchall()
+        return [str(row[0]).strip() for row in rows if row and row[0]]
+
+
+def get_system_setting(setting_key: str, default: Optional[str] = None) -> Optional[str]:
+    """Get a single system setting value by key."""
+    if not setting_key:
+        return default
+
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT setting_value
+                FROM system_settings
+                WHERE setting_key = ?
+                LIMIT 1
+                """,
+                (setting_key,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return default
+            return row[0] if row[0] is not None else default
+    except Exception as e:
+        print(f"Error reading system setting {setting_key}: {e}")
+        return default
+
+
+def set_system_setting(setting_key: str, setting_value: Optional[str]) -> None:
+    """Insert or update a system setting value."""
+    if not setting_key:
+        return
+
+    normalized_value = "" if setting_value is None else str(setting_value)
+    now_iso = datetime.now(pytz.timezone('Asia/Baghdad')).isoformat()
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO system_settings (setting_key, setting_value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(setting_key) DO UPDATE SET
+                setting_value = excluded.setting_value,
+                updated_at = excluded.updated_at
+            """,
+            (setting_key, normalized_value, now_iso),
+        )
         conn.commit()
 
 
@@ -747,11 +900,18 @@ def detect_device_type(user_agent: str) -> Dict[str, str]:
     """
     if not user_agent:
         return {"device": "Unknown", "os": "Unknown", "browser": "Unknown", "icon": "fa-question"}
-    
-    ua_lower = user_agent.lower()
+
+    import html as _html
+
+    # Values are escaped before admin rendering; unescape so detection works on raw UA.
+    ua_text = _html.unescape(str(user_agent))
+    ua_lower = ua_text.lower()
     
     # Detect Device Type
-    if 'mobile' in ua_lower or 'android' in ua_lower or 'iphone' in ua_lower:
+    if any(token in ua_lower for token in ['bot', 'crawler', 'spider', 'scrapy', 'curl', 'wget', 'python-requests', 'postman']):
+        device = "Bot/Script"
+        icon = "fa-robot"
+    elif 'mobile' in ua_lower or 'android' in ua_lower or 'iphone' in ua_lower:
         device = "Mobile"
         icon = "fa-mobile-alt"
     elif 'tablet' in ua_lower or 'ipad' in ua_lower:

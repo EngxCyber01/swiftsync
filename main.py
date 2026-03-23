@@ -1,4 +1,5 @@
 import asyncio
+import html as html_lib
 import hmac
 import ipaddress
 import json
@@ -31,7 +32,7 @@ import database as db
 from telegram_notifier import notify_new_lecture, notify_multiple_lectures, test_telegram_connection
 from telegram_config import telegram_status
 
-load_dotenv(override=True)
+load_dotenv(override=False)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 # Get base URL from environment or detect from request
@@ -42,8 +43,19 @@ _openai_key = os.getenv("OPENAI_API_KEY")
 ADMIN_SECRET_KEY = (os.getenv("SECRET_ADMIN_KEY") or os.getenv("ADMIN_KEY") or "").strip()
 
 
+def _get_admin_keys() -> List[str]:
+    """Resolve admin keys from current environment for runtime-safe validation."""
+    raw = (os.getenv("SECRET_ADMIN_KEY") or os.getenv("ADMIN_KEY") or "").strip()
+    if not raw:
+        return []
+    return [key.strip() for key in raw.split(",") if key.strip()]
+
+
 def _is_valid_admin_key(candidate: str) -> bool:
-    return bool(ADMIN_SECRET_KEY) and hmac.compare_digest(candidate or "", ADMIN_SECRET_KEY)
+    value = (candidate or "").strip()
+    if not value:
+        return False
+    return any(hmac.compare_digest(value, key) for key in _get_admin_keys())
 
 if _gemini_key and _gemini_key != "your_gemini_api_key_here":
     logger.info(f"[OK] Gemini API key loaded (FREE tier) - starts with: {_gemini_key[:20]}...")
@@ -53,7 +65,7 @@ else:
     logger.debug("[DEBUG] No AI API key configured - summarization features disabled")
 
 # Log admin key for debugging
-if ADMIN_SECRET_KEY:
+if _get_admin_keys():
     logger.info("[OK] Admin SOC key configured (hidden for security)")
 else:
     logger.warning("[WARN] No admin key found")
@@ -118,6 +130,7 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/files", StaticFiles(directory=DOWNLOAD_DIR, html=False), name="files")
 static_dir = Path("static")
 static_dir.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=static_dir, html=False), name="static")
 
 # Cache official results snapshots to avoid hard failures when upstream is slow/unstable.
 OFFICIAL_RESULTS_CACHE_PATH = Path(os.getenv("OFFICIAL_RESULTS_CACHE_PATH", "data/official_results_cache.json"))
@@ -225,7 +238,8 @@ def _normalize_ip(value: str) -> str:
         return ""
 
 
-TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "false").strip().lower() in {"1", "true", "yes"}
+_trust_proxy_default = "true" if IS_PRODUCTION else "false"
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", _trust_proxy_default).strip().lower() in {"1", "true", "yes"}
 _trusted_proxy_env = os.getenv("TRUSTED_PROXY_IPS", "").strip()
 TRUSTED_PROXY_IPS = {
     normalized
@@ -240,6 +254,66 @@ TRUSTED_PROXY_IPS = {
 RATE_LIMIT_SYNC_PER_MINUTE = int(os.getenv("RATE_LIMIT_SYNC_PER_MINUTE", "6"))
 RATE_LIMIT_SUMMARY_PER_MINUTE = int(os.getenv("RATE_LIMIT_SUMMARY_PER_MINUTE", "30"))
 _rate_limiter_store = {}
+AUTO_BLOCK_THREATS = os.getenv("AUTO_BLOCK_THREATS", "true").strip().lower() in {"1", "true", "yes"}
+
+DEFAULT_HOMEPAGE_BANNER_TEXT = "جــەژنــتــــــان پــیــــرۆز بـــێــت"
+DEFAULT_HOMEPAGE_BANNER_ALT_TEXT = "E I D    M U B A R A K "
+
+
+def _is_valid_iso_date(value: str) -> bool:
+    raw = (value or "").strip()
+    if not raw:
+        return True
+    try:
+        datetime.strptime(raw, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
+def _is_date_window_active(start_date: str, end_date: str) -> bool:
+    """Evaluate optional start/end date strings (YYYY-MM-DD)."""
+    today = datetime.now().date()
+
+    if start_date and _is_valid_iso_date(start_date):
+        if today < datetime.strptime(start_date, "%Y-%m-%d").date():
+            return False
+
+    if end_date and _is_valid_iso_date(end_date):
+        if today > datetime.strptime(end_date, "%Y-%m-%d").date():
+            return False
+
+    return True
+
+
+def _get_homepage_banner_settings() -> dict:
+    """Load homepage banner settings with safe fallback defaults."""
+    # Backward compatibility: if new Kurdish key is empty, use old single-key value.
+    configured_text_ku = (db.get_system_setting("homepage_banner_text_ku", "") or "").strip()
+    legacy_text = (db.get_system_setting("homepage_banner_text", "") or "").strip()
+    configured_text_en = (db.get_system_setting("homepage_banner_text_en", "") or "").strip()
+
+    if not configured_text_ku and legacy_text:
+        configured_text_ku = legacy_text
+
+    enabled_raw = (db.get_system_setting("homepage_banner_enabled", "true") or "true").strip().lower()
+    start_date = (db.get_system_setting("homepage_banner_start_date", "") or "").strip()
+    end_date = (db.get_system_setting("homepage_banner_end_date", "") or "").strip()
+
+    is_enabled = enabled_raw not in {"0", "false", "no", "off"}
+    in_window = _is_date_window_active(start_date, end_date)
+    use_custom_ku = bool(configured_text_ku) and is_enabled and in_window
+    use_custom_en = bool(configured_text_en) and is_enabled and in_window
+
+    return {
+        "text_ku": configured_text_ku,
+        "text_en": configured_text_en,
+        "enabled": is_enabled,
+        "start_date": start_date,
+        "end_date": end_date,
+        "display_text_ku": configured_text_ku if use_custom_ku else DEFAULT_HOMEPAGE_BANNER_TEXT,
+        "display_text_en": configured_text_en if use_custom_en else DEFAULT_HOMEPAGE_BANNER_ALT_TEXT,
+    }
 
 
 def _resolve_session_token(request: Request) -> str:
@@ -358,6 +432,17 @@ async def visitor_tracking_middleware(request: Request, call_next):
             status_code=403
         )
     
+    # Hard block known identity values before processing expensive logic.
+    username_qs = (request.query_params.get("username") or "").strip().lower()
+    if username_qs and db.is_identity_blocked("username", username_qs):
+        return JSONResponse(
+            {
+                "success": False,
+                "error": "Access denied. Account is blocked by security policy."
+            },
+            status_code=403,
+        )
+
     # Log visitor activity for monitored paths
     monitored_paths = ["/", "/check-attendance", "/admin-portal"]
     if any(request.url.path.startswith(path) for path in monitored_paths):
@@ -417,13 +502,29 @@ async def visitor_tracking_middleware(request: Request, call_next):
             threat_type = "HEADER_INJECTION_ATTEMPT"
             threat_details = "Suspicious patterns in HTTP headers"
         
-        # Auto-block if threat detected (DISABLED FOR NOW - ONLY LOG)
+        # Auto-block if threat detected
         if threat_detected:
-            # Log the threat but DON'T auto-block yet (too aggressive for production)
             db.log_threat_detection(client_ip, threat_type, threat_details)
-            logger.warning(f"⚠️ THREAT DETECTED (Not Blocked): {client_ip} - {threat_type}")
-            # Note: Admin can manually block IPs from the SOC dashboard
-            # Continue processing request normally (don't block)
+
+            if AUTO_BLOCK_THREATS:
+                reason = f"AUTO_BLOCK: {threat_type}"
+                db.block_ip(client_ip, reason=reason)
+
+                # Also block any known identities seen on this IP to reduce VPN bypass.
+                for known_username in db.get_recent_usernames_by_ip(client_ip, limit=10):
+                    db.block_identity("username", known_username, reason=f"Linked to {client_ip} ({threat_type})")
+
+                logger.warning(f"⚠️ THREAT DETECTED AND BLOCKED: {client_ip} - {threat_type}")
+                return JSONResponse(
+                    {
+                        "success": False,
+                        "error": "Request blocked by SOC threat detection.",
+                        "threat_type": threat_type,
+                    },
+                    status_code=403,
+                )
+
+            logger.warning(f"⚠️ THREAT DETECTED (log-only): {client_ip} - {threat_type}")
     
     # Continue processing request
     response = await call_next(request)
@@ -1027,6 +1128,35 @@ async def attendance_login(request: Request) -> JSONResponse:
                 "error": "Username and password are required"
             }, status_code=400)
         
+        # Blocked identities cannot authenticate even from a new IP/VPN.
+        if db.is_identity_blocked("username", username):
+            db.log_visitor(
+                client_ip,
+                f"Blocked Login Attempt: {username}",
+                user_agent,
+                "/api/attendance/login",
+                username=username
+            )
+            logger.warning(f"🚫 Blocked account login attempt: {username} from IP {client_ip}")
+            return JSONResponse({
+                "success": False,
+                "error": "This account is blocked by admin/security policy"
+            }, status_code=403)
+
+        # If IP is already blocked, deny login immediately.
+        if db.is_ip_blocked(client_ip):
+            db.log_visitor(
+                client_ip,
+                f"Blocked IP Login Attempt: {username}",
+                user_agent,
+                "/api/attendance/login",
+                username=username
+            )
+            return JSONResponse({
+                "success": False,
+                "error": "Your IP address is blocked"
+            }, status_code=403)
+
         result = await attendance_service.authenticate_user(username, password)
         
         if result['success']:
@@ -2384,11 +2514,18 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
     recent_visitors = db.get_recent_visitors(100)
     blocked_ips = db.get_blocked_ips()
     threat_logs = db.get_threat_logs(50)
+    banner_settings = _get_homepage_banner_settings()
+    banner_text_ku_escaped = html_lib.escape(banner_settings["text_ku"], quote=True)
+    banner_text_en_escaped = html_lib.escape(banner_settings["text_en"], quote=True)
+    banner_start_date_escaped = html_lib.escape(banner_settings["start_date"], quote=True)
+    banner_end_date_escaped = html_lib.escape(banner_settings["end_date"], quote=True)
+    banner_enabled_checked = "checked" if banner_settings["enabled"] else ""
 
     def _render_device_info(user_agent: str) -> str:
         if not user_agent:
             return "<span style='color: var(--text-secondary);'>Unknown</span>"
         device = db.detect_device_type(user_agent)
+        ua_preview = user_agent if len(user_agent) <= 120 else f"{user_agent[:120]}..."
         return (
             "<div style=\"display: flex; flex-direction: column; gap: 4px;\">"
             "<span style=\"display: flex; align-items: center; gap: 6px; color: var(--kurdish-yellow); font-weight: 600; font-size: 0.875rem;\">"
@@ -2399,6 +2536,9 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
             "</span>"
             "<span style=\"color: var(--text-secondary); font-size: 0.75rem;\">"
             f"<i class=\"fas fa-globe\" style=\"font-size: 0.7rem;\"></i> {device['browser']}"
+            "</span>"
+            "<span style=\"color: var(--text-secondary); font-size: 0.7rem; word-break: break-word;\" title=\"Raw User-Agent\">"
+            f"<i class=\"fas fa-fingerprint\" style=\"font-size: 0.7rem;\"></i> UA: {ua_preview}"
             "</span>"
             "</div>"
         )
@@ -2413,454 +2553,481 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
         <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-            
+
             :root {{
-                --kurdish-red: #DC143C;
-                --kurdish-green: #228B22;
-                --kurdish-yellow: #FFD700;
-                --kurdish-white: #FFFFFF;
-                --success: #10b981;
+                --kurdish-red: #dc143c;
+                --kurdish-green: #228b22;
+                --kurdish-yellow: #ffd700;
+                --bg-dark: #0b1324;
+                --bg-card: #15223d;
+                --bg-soft: #1f3157;
+                --text-primary: #eef4ff;
+                --text-secondary: #a7b5d4;
+                --border: rgba(167, 181, 212, 0.2);
                 --danger: #ef4444;
-                --warning: #f59e0b;
                 --info: #3b82f6;
-                --bg-dark: #0f172a;
-                --bg-card: #1e293b;
-                --text-primary: #f1f5f9;
-                --text-secondary: #94a3b8;
-                --border: rgba(148, 163, 184, 0.15);
             }}
-            
+
             * {{
                 margin: 0;
                 padding: 0;
                 box-sizing: border-box;
                 user-select: none;
             }}
-            
+
+            html,
+            body {{
+                width: 100%;
+                overflow-x: hidden;
+            }}
+
             body {{
                 font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                background:
+                    radial-gradient(1200px 700px at 15% -20%, rgba(34, 139, 34, 0.18), transparent 55%),
+                    radial-gradient(1200px 700px at 90% 0%, rgba(220, 20, 60, 0.2), transparent 60%),
+                    linear-gradient(145deg, var(--bg-dark) 0%, #101c34 45%, #0f1a31 100%);
                 color: var(--text-primary);
                 min-height: 100vh;
-                padding: 1.5rem;
+                padding: 1rem;
             }}
-            
+
+            #splash-screen {{
+                position: fixed;
+                inset: 0;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 0.5rem;
+                background: rgba(11, 19, 36, 0.94);
+                backdrop-filter: blur(8px);
+                z-index: 9999;
+                transition: opacity 0.35s ease;
+            }}
+
+            #splash-screen.hidden {{
+                opacity: 0;
+                pointer-events: none;
+            }}
+
+            .splash-logo {{
+                width: 86px;
+                height: 86px;
+                border-radius: 18px;
+                box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+            }}
+
+            .splash-text {{
+                font-size: 1.35rem;
+                font-weight: 800;
+                letter-spacing: 0.02em;
+                color: var(--text-primary);
+            }}
+
+            .splash-subtitle {{
+                font-size: 0.82rem;
+                color: var(--text-secondary);
+            }}
+
             .container {{
-                max-width: 1600px;
+                width: min(1600px, 100%);
                 margin: 0 auto;
             }}
-            
+
             .header {{
-                background: rgba(30, 41, 59, 0.95);
-                padding: 1.5rem 2rem;
-                border-radius: 12px;
-                margin-bottom: 2rem;
+                background: linear-gradient(160deg, rgba(21, 34, 61, 0.96), rgba(31, 49, 87, 0.9));
+                padding: 1.2rem 1.3rem;
+                border-radius: 16px;
+                margin-bottom: 1.25rem;
                 border: 1px solid var(--border);
-                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
                 display: flex;
+                align-items: center;
                 justify-content: space-between;
-                align-items: center;
+                gap: 0.9rem;
+                flex-wrap: wrap;
                 position: sticky;
-                top: 0;
-                z-index: 1000;
-                backdrop-filter: blur(10px);
+                top: 0.6rem;
+                z-index: 25;
             }}
-            
+
             .header-left {{
-                display: flex;
-                align-items: center;
-                gap: 1rem;
+                min-width: 0;
             }}
-            
-            .logo {{
-                width: 48px;
-                height: 48px;
-                background: linear-gradient(135deg, var(--kurdish-red) 0%, var(--kurdish-yellow) 50%, var(--kurdish-green) 100%);
-                border-radius: 10px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 1.5rem;
-                color: white;
-                box-shadow: 0 4px 12px rgba(220, 20, 60, 0.3);
-            }}
-            
+
             .header h1 {{
-                font-size: 1.75rem;
+                font-size: clamp(1.2rem, 2vw, 1.65rem);
                 font-weight: 800;
-                background: linear-gradient(90deg, var(--kurdish-red) 0%, var(--kurdish-yellow) 50%, var(--kurdish-green) 100%);
-            .logo-text {{
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                gap: 0.15rem;
-            }}
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                background-clip: text;
                 letter-spacing: -0.02em;
             }}
-            
+
             .header-subtitle {{
                 color: var(--text-secondary);
-                font-size: 0.875rem;
-                font-weight: 500;
+                font-size: 0.82rem;
                 margin-top: 0.25rem;
-                row-gap: 0.35rem;
-                flex-direction: column;
-            
+            }}
+
             .stats-grid {{
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                gap: 1.5rem;
-                margin-bottom: 2rem;
+                grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+                gap: 0.9rem;
+                margin-bottom: 1.15rem;
             }}
-            
+
             .stat-card {{
-                flex-shrink: 0;
-                display: inline-flex;
-                padding: 1.5rem;
-                border-radius: 12px;
+                background: linear-gradient(165deg, rgba(21, 34, 61, 0.92), rgba(23, 38, 68, 0.92));
+                padding: 1rem;
+                border-radius: 14px;
                 border: 1px solid var(--border);
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
                 transition: transform 0.2s ease, box-shadow 0.2s ease;
             }}
-            
+
             .stat-card:hover {{
                 transform: translateY(-2px);
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+                box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
             }}
-            
+
             .stat-icon {{
-                width: 48px;
-                height: 48px;
+                width: 42px;
+                height: 42px;
                 border-radius: 10px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                font-size: 1.25rem;
-                margin-bottom: 1rem;
-                color: white;
+                font-size: 1rem;
+                margin-bottom: 0.75rem;
+                color: #fff;
             }}
-            
+
             .stat-card:nth-child(1) .stat-icon {{
                 background: var(--kurdish-red);
-                box-shadow: 0 4px 12px rgba(220, 20, 60, 0.3);
             }}
-            
+
             .stat-card:nth-child(2) .stat-icon {{
-                background: var(--kurdish-yellow);
-                box-shadow: 0 4px 12px rgba(255, 215, 0, 0.3);
+                background: #f59e0b;
             }}
-            
+
             .stat-card:nth-child(3) .stat-icon {{
                 background: var(--kurdish-green);
-                box-shadow: 0 4px 12px rgba(34, 139, 34, 0.3);
             }}
-            
+
             .stat-card:nth-child(4) .stat-icon {{
                 background: linear-gradient(135deg, var(--kurdish-red) 0%, var(--kurdish-yellow) 50%, var(--kurdish-green) 100%);
-                box-shadow: 0 4px 12px rgba(220, 20, 60, 0.3);
             }}
-            
+
             .stat-card h3 {{
                 color: var(--text-secondary);
-                font-size: 0.75rem;
-                font-weight: 600;
+                font-size: 0.72rem;
                 text-transform: uppercase;
-                letter-spacing: 0.05em;
-                margin-bottom: 0.5rem;
+                letter-spacing: 0.06em;
+                margin-bottom: 0.45rem;
             }}
-            
+
             .stat-card .value {{
-                font-size: 2.5rem;
+                font-size: clamp(1.6rem, 4.5vw, 2.1rem);
                 font-weight: 900;
-                color: var(--text-primary);
                 line-height: 1;
             }}
-            
+
             .section {{
-                background: rgba(30, 41, 59, 0.8);
-                padding: 1.5rem;
-                border-radius: 12px;
-                margin-bottom: 1.5rem;
+                background: linear-gradient(170deg, rgba(21, 34, 61, 0.86), rgba(16, 28, 52, 0.9));
+                padding: 1rem;
+                border-radius: 14px;
+                margin-bottom: 1rem;
                 border: 1px solid var(--border);
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+                overflow: hidden;
             }}
-            
+
             .section-header {{
                 display: flex;
                 align-items: center;
-                gap: 0.75rem;
-                margin-bottom: 1.5rem;
-                padding-bottom: 1rem;
+                gap: 0.7rem;
+                margin-bottom: 1rem;
+                padding-bottom: 0.9rem;
                 border-bottom: 1px solid var(--border);
+                flex-wrap: wrap;
             }}
-            
+
             .section-icon {{
-                width: 40px;
-                height: 40px;
-                background: linear-gradient(135deg, var(--kurdish-red) 0%, var(--kurdish-yellow) 50%, var(--kurdish-green) 100%);
+                width: 36px;
+                height: 36px;
                 border-radius: 8px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                color: white;
-                font-size: 1rem;
+                color: #fff;
+                background: linear-gradient(135deg, var(--kurdish-red) 0%, var(--kurdish-yellow) 50%, var(--kurdish-green) 100%);
             }}
-            
+
             .section h2 {{
-                font-size: 1.25rem;
+                font-size: 1.05rem;
                 font-weight: 700;
-                color: var(--text-primary);
-                letter-spacing: -0.01em;
+                min-width: 0;
+                word-break: break-word;
             }}
-            
+
             .table-wrapper {{
+                width: 100%;
                 overflow-x: auto;
-                border-radius: 8px;
+                -webkit-overflow-scrolling: touch;
+                border-radius: 10px;
                 border: 1px solid var(--border);
-                background: rgba(15, 23, 42, 0.5);
+                background: rgba(10, 18, 34, 0.55);
             }}
-            
+
             .table-wrapper::-webkit-scrollbar {{
                 height: 8px;
             }}
-            
-            .table-wrapper::-webkit-scrollbar-track {{
-                background: rgba(15, 23, 42, 0.5);
-            }}
-            
+
             .table-wrapper::-webkit-scrollbar-thumb {{
-                background: var(--kurdish-yellow);
-                border-radius: 4px;
+                background: rgba(255, 215, 0, 0.6);
+                border-radius: 999px;
             }}
-            
+
             table {{
                 width: 100%;
+                min-width: 760px;
                 border-collapse: collapse;
             }}
-            
+
             th {{
-                background: rgba(30, 41, 59, 0.9);
-                padding: 0.875rem 1.25rem;
+                background: rgba(31, 49, 87, 0.78);
+                padding: 0.72rem 0.9rem;
                 text-align: left;
                 color: var(--kurdish-yellow);
-                font-size: 0.75rem;
+                font-size: 0.7rem;
                 font-weight: 700;
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
                 border-bottom: 1px solid var(--border);
             }}
-            
+
             td {{
-                padding: 0.875rem 1.25rem;
+                padding: 0.72rem 0.9rem;
                 border-bottom: 1px solid var(--border);
                 color: var(--text-primary);
-                font-size: 0.875rem;
+                font-size: 0.82rem;
+                vertical-align: middle;
             }}
-            
-            tr:hover td {{
-                background: rgba(255, 215, 0, 0.05);
-            }}
-            
+
             tr:last-child td {{
                 border-bottom: none;
             }}
-            
+
+            tr:hover td {{
+                background: rgba(255, 215, 0, 0.05);
+            }}
+
             .btn {{
-                padding: 0.625rem 1.25rem;
-                border: none;
-                border-radius: 8px;
+                border: 0;
+                border-radius: 9px;
+                padding: 0.55rem 0.95rem;
                 cursor: pointer;
+                font-size: 0.82rem;
                 font-weight: 600;
-                font-size: 0.875rem;
-                transition: all 0.2s ease;
+                color: #fff;
                 display: inline-flex;
                 align-items: center;
-                gap: 0.5rem;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                justify-content: center;
+                gap: 0.4rem;
+                transition: transform 0.18s ease, filter 0.18s ease;
+                max-width: 100%;
             }}
-            
+
             .btn:hover {{
                 transform: translateY(-1px);
-                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+                filter: brightness(1.08);
             }}
-            
-            .btn:active {{
-                transform: translateY(0);
-            }}
-            
+
             .refresh-btn {{
-                background: linear-gradient(135deg, var(--kurdish-red) 0%, var(--kurdish-yellow) 100%);
-                color: white;
+                background: linear-gradient(135deg, #f43f5e, #f59e0b);
             }}
-            
-            .btn-block {{
-                background: var(--kurdish-red);
-                color: white;
-            }}
-            
-            .btn-unblock {{
-                background: var(--kurdish-green);
-                color: white;
-            }}
-            
+
+            .btn-block,
             .btn-danger {{
-                background: var(--kurdish-red);
-                color: white;
+                background: linear-gradient(135deg, #ef4444, #dc2626);
             }}
-            
+
+            .btn-unblock {{
+                background: linear-gradient(135deg, #16a34a, #15803d);
+            }}
+
             .ip-address {{
-                font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.35rem;
+                font-family: 'Consolas', 'Monaco', monospace;
                 background: rgba(255, 215, 0, 0.1);
-                padding: 0.375rem 0.75rem;
-                border-radius: 6px;
+                padding: 0.28rem 0.55rem;
+                border-radius: 7px;
                 color: var(--kurdish-yellow);
                 font-weight: 600;
-                font-size: 0.875rem;
+                font-size: 0.78rem;
                 border: 1px solid rgba(255, 215, 0, 0.2);
-                display: inline-block;
+                max-width: 100%;
+                word-break: break-word;
             }}
-            
+
             .timestamp {{
                 color: var(--text-secondary);
-                font-size: 0.875rem;
+                font-size: 0.8rem;
             }}
-            
+
             .action-badge {{
-                display: inline-block;
-                padding: 0.25rem 0.625rem;
-                border-radius: 4px;
-                font-size: 0.75rem;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.35rem;
+                padding: 0.25rem 0.5rem;
+                border-radius: 7px;
+                font-size: 0.72rem;
                 font-weight: 600;
                 background: rgba(59, 130, 246, 0.1);
                 color: var(--info);
-                border: 1px solid rgba(59, 130, 246, 0.2);
+                border: 1px solid rgba(59, 130, 246, 0.25);
             }}
-            
-            /* SOC Threat Detection Styles */
+
             .threat-detection-panel {{
-                background: rgba(30, 41, 59, 0.9);
-                border: 1px solid rgba(220, 20, 60, 0.3);
-                box-shadow: 0 0 20px rgba(220, 20, 60, 0.1);
+                border-color: rgba(220, 20, 60, 0.35);
+                box-shadow: 0 0 0 1px rgba(220, 20, 60, 0.18), 0 14px 28px rgba(0, 0, 0, 0.2);
             }}
-            
+
             .threat-rules-grid {{
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                gap: 1rem;
-                margin-bottom: 1.5rem;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 0.8rem;
+                margin-bottom: 0.95rem;
             }}
-            
+
             .threat-rule-card {{
-                background: rgba(15, 23, 42, 0.6);
+                background: rgba(11, 19, 36, 0.65);
                 border: 1px solid var(--border);
-                border-radius: 10px;
-                padding: 1.25rem;
-                transition: all 0.3s ease;
+                border-radius: 12px;
+                padding: 0.85rem;
+                transition: border-color 0.2s ease, transform 0.2s ease;
             }}
-            
+
             .threat-rule-card:hover {{
-                transform: translateY(-3px);
-                box-shadow: 0 8px 25px rgba(220, 20, 60, 0.2);
-                border-color: var(--kurdish-red);
+                transform: translateY(-2px);
+                border-color: rgba(220, 20, 60, 0.5);
             }}
-            
+
             .rule-header {{
                 display: flex;
                 align-items: center;
-                gap: 0.75rem;
-                margin-bottom: 0.75rem;
+                gap: 0.65rem;
+                margin-bottom: 0.65rem;
             }}
-            
+
             .rule-icon {{
-                width: 40px;
-                height: 40px;
+                width: 34px;
+                height: 34px;
                 border-radius: 8px;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                color: white;
-                font-size: 1.1rem;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            }}
-            
-            .rule-info h4 {{
-                color: var(--text-primary);
+                color: #fff;
                 font-size: 0.95rem;
-                font-weight: 700;
-                margin-bottom: 0.25rem;
             }}
-            
+
+            .rule-info h4 {{
+                font-size: 0.88rem;
+                margin-bottom: 0.18rem;
+            }}
+
             .rule-status {{
-                font-size: 0.7rem;
-                font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-                padding: 0.2rem 0.5rem;
-                border-radius: 4px;
                 display: inline-block;
+                font-size: 0.64rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                padding: 0.18rem 0.45rem;
+                border-radius: 5px;
             }}
-            
+
             .rule-status.active {{
                 background: rgba(34, 139, 34, 0.2);
                 color: var(--kurdish-green);
-                border: 1px solid rgba(34, 139, 34, 0.3);
+                border: 1px solid rgba(34, 139, 34, 0.35);
             }}
-            
+
             .rule-description {{
                 color: var(--text-secondary);
-                font-size: 0.85rem;
-                line-height: 1.5;
-                margin-bottom: 0.75rem;
+                font-size: 0.8rem;
+                line-height: 1.45;
+                margin-bottom: 0.62rem;
             }}
-            
+
             .rule-stats {{
                 display: flex;
                 justify-content: space-between;
-                gap: 0.5rem;
-                font-size: 0.75rem;
+                gap: 0.45rem;
+                font-size: 0.7rem;
                 color: var(--text-secondary);
+                flex-wrap: wrap;
             }}
-            
+
             .rule-stats span {{
-                display: flex;
+                display: inline-flex;
                 align-items: center;
-                gap: 0.3rem;
+                gap: 0.25rem;
             }}
-            
+
             .rule-stats i {{
                 color: var(--kurdish-yellow);
             }}
-            
+
             .status-badge {{
                 display: inline-flex;
                 align-items: center;
-                gap: 0.4rem;
-                padding: 0.5rem 1rem;
-                background: rgba(34, 139, 34, 0.2);
-                border: 1px solid rgba(34, 139, 34, 0.3);
-                border-radius: 8px;
+                gap: 0.35rem;
+                padding: 0.4rem 0.7rem;
+                border-radius: 999px;
+                background: rgba(34, 139, 34, 0.18);
+                border: 1px solid rgba(34, 139, 34, 0.35);
                 color: var(--kurdish-green);
-                font-size: 0.8rem;
+                font-size: 0.72rem;
                 font-weight: 700;
-                text-transform: uppercase;
                 letter-spacing: 0.05em;
+                text-transform: uppercase;
             }}
-            
+
             .status-active {{
-                animation: pulse 2s ease-in-out infinite;
+                animation: pulse 1.8s ease-in-out infinite;
             }}
-            
+
+            .threat-actions {{
+                display: flex;
+                gap: 0.6rem;
+                flex-wrap: wrap;
+                padding-top: 0.9rem;
+                border-top: 1px solid var(--border);
+            }}
+
+            .threat-btn {{
+                flex: 1 1 180px;
+                min-width: 0;
+                padding: 0.65rem 0.9rem;
+                background: rgba(220, 20, 60, 0.14);
+                border: 1px solid rgba(220, 20, 60, 0.35);
+                color: #ffd4dd;
+            }}
+
+            .threat-btn:hover {{
+                background: rgba(220, 20, 60, 0.28);
+            }}
+
             @keyframes pulse {{
-                0%, 100% {{ opacity: 1; }}
-                50% {{ opacity: 0.7; }}
+                0%,
+                100% {{ opacity: 1; }}
+                50% {{ opacity: 0.72; }}
             }}
-            
+
             @keyframes slideInRight {{
                 from {{
-                    transform: translateX(400px);
+                    transform: translateX(360px);
                     opacity: 0;
                 }}
                 to {{
@@ -2868,124 +3035,76 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                     opacity: 1;
                 }}
             }}
-            
+
             @keyframes slideOutRight {{
                 from {{
                     transform: translateX(0);
                     opacity: 1;
                 }}
                 to {{
-                    transform: translateX(400px);
+                    transform: translateX(360px);
                     opacity: 0;
                 }}
             }}
-            
-            .threat-actions {{
-                display: flex;
-                gap: 1rem;
-                flex-wrap: wrap;
-                padding-top: 1rem;
-                border-top: 1px solid var(--border);
-            }}
-            
-            .threat-btn {{
-                flex: 1;
-                min-width: 200px;
-                padding: 0.875rem 1.5rem;
-                background: rgba(220, 20, 60, 0.1);
-                border: 1px solid rgba(220, 20, 60, 0.3);
-                color: var(--kurdish-red);
-                border-radius: 8px;
-                cursor: pointer;
-                font-weight: 600;
-                font-size: 0.875rem;
-                transition: all 0.3s ease;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                gap: 0.5rem;
-            }}
-            
-            .threat-btn:hover {{
-                background: var(--kurdish-red);
-                color: white;
-                transform: translateY(-2px);
-                box-shadow: 0 6px 20px rgba(220, 20, 60, 0.4);
-            }}
-            
-            /* Mobile Responsiveness */
-            @media (max-width: 768px) {{
+
+            @media (max-width: 900px) {{
                 body {{
-                    padding: 0.75rem;
+                    padding: 0.7rem;
                 }}
-                
+
                 .header {{
-                    flex-direction: column;
-                    gap: 1rem;
+                    top: 0.35rem;
                     padding: 1rem;
                 }}
-                
-                .header-left {{
+
+                .header > div:last-child {{
                     width: 100%;
-                    justify-content: center;
+                    justify-content: flex-start;
+                    flex-wrap: wrap;
                 }}
-                
-                .header h1 {{
-                    font-size: 1.25rem;
-                }}
-                
+
                 .stats-grid {{
-                    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                    gap: 0.75rem;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
                 }}
-                
-                .stat-card {{
-                    padding: 1rem;
-                }}
-                
-                .stat-card .value {{
-                    font-size: 1.75rem;
-                }}
-                
+
                 .section {{
-                    padding: 1rem;
+                    padding: 0.85rem;
                 }}
-                
+
                 .threat-rules-grid {{
                     grid-template-columns: 1fr;
                 }}
-                
-                .threat-actions {{
-                    flex-direction: column;
+            }}
+
+            @media (max-width: 640px) {{
+                .stats-grid {{
+                    grid-template-columns: 1fr;
                 }}
-                
-                .threat-btn {{
-                    width: 100%;
-                    min-width: auto;
+
+                .header h1 {{
+                    font-size: 1.1rem;
                 }}
-                
-                .table-wrapper {{
-                    overflow-x: auto;
-                    -webkit-overflow-scrolling: touch;
-                }}
-                
-                table {{
+
+                .header-subtitle {{
                     font-size: 0.75rem;
                 }}
-                
-                th, td {{
-                    padding: 0.5rem;
+
+                .btn {{
+                    width: 100%;
+                }}
+
+                .threat-btn {{
+                    flex-basis: 100%;
+                }}
+
+                th,
+                td {{
+                    padding: 0.55rem 0.62rem;
                     white-space: nowrap;
                 }}
-                
-                .btn {{
-                    padding: 0.5rem 0.75rem;
-                    font-size: 0.75rem;
-                }}
-                
-                .ip-address {{
-                    font-size: 0.75rem;
-                    padding: 0.25rem 0.5rem;
+
+                table {{
+                    min-width: 640px;
                 }}
             }}
         </style>
@@ -3017,6 +3136,16 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                     return false;
                 }}
             }});
+
+            // Quickly fade out splash to avoid covering admin controls.
+            window.addEventListener('load', () => {{
+                const splash = document.getElementById('splash-screen');
+                if (!splash) return;
+                setTimeout(() => {{
+                    splash.classList.add('hidden');
+                    setTimeout(() => splash.remove(), 350);
+                }}, 500);
+            }});
             
             // Clear activity logs function
             async function clearActivityLogs() {{
@@ -3045,6 +3174,45 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                     }}
                 }} catch (error) {{
                     alert('Failed to clear activity: ' + error.message);
+                }}
+            }}
+
+            async function saveHomepageBannerSettings() {{
+                const adminKey = new URLSearchParams(window.location.search).get('admin_key');
+                if (!adminKey) {{
+                    alert('Missing admin key in URL.');
+                    return;
+                }}
+
+                const textKuInput = document.getElementById('homepageBannerTextKu');
+                const textEnInput = document.getElementById('homepageBannerTextEn');
+                const enabledInput = document.getElementById('homepageBannerEnabled');
+                const startInput = document.getElementById('homepageBannerStartDate');
+                const endInput = document.getElementById('homepageBannerEndDate');
+
+                const payload = {{
+                    text_ku: (textKuInput?.value || '').trim(),
+                    text_en: (textEnInput?.value || '').trim(),
+                    enabled: !!(enabledInput?.checked),
+                    start_date: (startInput?.value || '').trim(),
+                    end_date: (endInput?.value || '').trim(),
+                }};
+
+                try {{
+                    const response = await fetch(`/admin-portal/settings/banner?admin_key=${{encodeURIComponent(adminKey)}}`, {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify(payload)
+                    }});
+
+                    const result = await response.json();
+                    if (result.success) {{
+                        alert('Homepage banner settings saved successfully.');
+                    }} else {{
+                        alert('Error: ' + (result.error || 'Failed to save settings'));
+                    }}
+                }} catch (error) {{
+                    alert('Failed to save banner settings: ' + error.message);
                 }}
             }}
         </script>
@@ -3094,6 +3262,44 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
                     </div>
                     <h3>Activity (24h)</h3>
                     <div class="value">{stats['recent_activity_24h']}</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-icon" style="background: linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%);">
+                        <i class="fas fa-heading"></i>
+                    </div>
+                    <h2>Homepage Banner Settings</h2>
+                </div>
+                <div style="display: grid; gap: 0.9rem;">
+                    <label style="display: grid; gap: 0.35rem; color: var(--text-secondary); font-size: 0.82rem;">
+                        Kurdish Slide Text
+                        <input id="homepageBannerTextKu" type="text" value="{banner_text_ku_escaped}" placeholder="Enter Kurdish banner text" style="width: 100%; border-radius: 8px; border: 1px solid var(--border); background: rgba(11, 19, 36, 0.65); color: var(--text-primary); padding: 0.65rem 0.75rem;" />
+                    </label>
+                    <label style="display: grid; gap: 0.35rem; color: var(--text-secondary); font-size: 0.82rem;">
+                        English Slide Text
+                        <input id="homepageBannerTextEn" type="text" value="{banner_text_en_escaped}" placeholder="Enter English banner text" style="width: 100%; border-radius: 8px; border: 1px solid var(--border); background: rgba(11, 19, 36, 0.65); color: var(--text-primary); padding: 0.65rem 0.75rem;" />
+                    </label>
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+                        <label style="display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text-secondary); font-size: 0.82rem;">
+                            <input id="homepageBannerEnabled" type="checkbox" {banner_enabled_checked} />
+                            Enable custom banner text
+                        </label>
+                        <label style="display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text-secondary); font-size: 0.82rem;">
+                            Start Date
+                            <input id="homepageBannerStartDate" type="date" value="{banner_start_date_escaped}" style="border-radius: 8px; border: 1px solid var(--border); background: rgba(11, 19, 36, 0.65); color: var(--text-primary); padding: 0.45rem 0.5rem;" />
+                        </label>
+                        <label style="display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text-secondary); font-size: 0.82rem;">
+                            End Date
+                            <input id="homepageBannerEndDate" type="date" value="{banner_end_date_escaped}" style="border-radius: 8px; border: 1px solid var(--border); background: rgba(11, 19, 36, 0.65); color: var(--text-primary); padding: 0.45rem 0.5rem;" />
+                        </label>
+                    </div>
+                    <div style="display: flex; justify-content: flex-end;">
+                        <button class="btn refresh-btn" onclick="saveHomepageBannerSettings()">
+                            <i class="fas fa-save"></i> Save Banner Settings
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -3442,6 +3648,46 @@ async def admin_portal(admin_key: str = None) -> HTMLResponse:
     """)
 
 
+@app.post("/admin-portal/settings/banner")
+async def update_homepage_banner_settings(request: Request, admin_key: str) -> JSONResponse:
+    """Save homepage banner settings from admin portal."""
+    if not _is_valid_admin_key(admin_key):
+        return JSONResponse({"success": False, "error": "Unauthorized"}, status_code=401)
+
+    try:
+        payload = {}
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        banner_text_ku = str(payload.get("text_ku", payload.get("text", ""))).strip()
+        banner_text_en = str(payload.get("text_en", "")).strip()
+        banner_enabled = bool(payload.get("enabled", True))
+        start_date = str(payload.get("start_date", "")).strip()
+        end_date = str(payload.get("end_date", "")).strip()
+
+        if not _is_valid_iso_date(start_date):
+            return JSONResponse({"success": False, "error": "Invalid start date format"}, status_code=400)
+
+        if not _is_valid_iso_date(end_date):
+            return JSONResponse({"success": False, "error": "Invalid end date format"}, status_code=400)
+
+        # Keep legacy key synchronized for backwards compatibility.
+        db.set_system_setting("homepage_banner_text", banner_text_ku)
+        db.set_system_setting("homepage_banner_text_ku", banner_text_ku)
+        db.set_system_setting("homepage_banner_text_en", banner_text_en)
+        db.set_system_setting("homepage_banner_enabled", "true" if banner_enabled else "false")
+        db.set_system_setting("homepage_banner_start_date", start_date)
+        db.set_system_setting("homepage_banner_end_date", end_date)
+
+        logger.info("Admin updated homepage banner settings")
+        return JSONResponse({"success": True, "message": "Homepage banner settings updated"})
+    except Exception as e:
+        logger.exception(f"Error updating homepage banner settings: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/admin-portal/block")
 async def block_ip_endpoint(admin_key: str, ip: str) -> JSONResponse:
     """Block an IP address"""
@@ -3450,8 +3696,17 @@ async def block_ip_endpoint(admin_key: str, ip: str) -> JSONResponse:
     
     try:
         db.block_ip(ip, reason="Manual block by admin")
+
+        # Block known usernames recently observed from this IP as well.
+        linked_users = db.get_recent_usernames_by_ip(ip, limit=20)
+        for linked_username in linked_users:
+            db.block_identity("username", linked_username, reason=f"Manual IP block link: {ip}")
+
         logger.warning(f"Admin blocked IP: {ip}")
-        return JSONResponse({"success": True, "message": f"IP {ip} blocked successfully"})
+        message = f"IP {ip} blocked successfully"
+        if linked_users:
+            message += f". Linked blocked usernames: {', '.join(linked_users)}"
+        return JSONResponse({"success": True, "message": message})
     except Exception as e:
         logger.exception(f"Error blocking IP: {e}")
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -3601,6 +3856,11 @@ async def attendance_logout(request: Request) -> JSONResponse:
 @app.get("/")
 async def dashboard() -> HTMLResponse:
     logo_version = "2026-03-18"
+    banner_settings = _get_homepage_banner_settings()
+    navbar_banner_texts_json = json.dumps(
+        [banner_settings["display_text_ku"], banner_settings["display_text_en"]],
+        ensure_ascii=False,
+    )
     html = f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -6785,10 +7045,7 @@ async def dashboard() -> HTMLResponse:
             // ===================================
             
             // Kurdish Text Typewriter Animation
-            const kurdishTexts = [
-                'جــەژنــتــــــان پــیــــرۆز بـــێــت',
-                'E I D     M U B A R A K ',
-            ];
+            const kurdishTexts = {navbar_banner_texts_json};
             
             let currentTextIndex = 0;
             let currentCharIndex = 0;
