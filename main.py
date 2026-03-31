@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import difflib
 import sqlite3
 import time
 import requests
@@ -41,6 +42,15 @@ IS_PRODUCTION = os.getenv("ENVIRONMENT", "").lower() == "production"
 _gemini_key = os.getenv("GEMINI_API_KEY")
 _openai_key = os.getenv("OPENAI_API_KEY")
 ADMIN_SECRET_KEY = (os.getenv("SECRET_ADMIN_KEY") or os.getenv("ADMIN_KEY") or "").strip()
+GENERIC_SUBJECT_LABELS = {
+    "",
+    "other",
+    "all lectures",
+    "general lectures",
+    "unknown",
+    "unknown subject",
+    "بابەتی جیاواز",
+}
 
 
 def _get_admin_keys() -> List[str]:
@@ -73,11 +83,17 @@ else:
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
     # Startup
-    # asyncio.create_task(sync_worker())
+    sync_task = asyncio.create_task(sync_worker(), name="swiftsync-sync-worker")
+    logger.info("Auto-sync worker enabled. Interval: %d seconds", SYNC_INTERVAL_SECONDS)
     
     yield
     
     # Shutdown (if needed)
+    sync_task.cancel()
+    try:
+        await sync_task
+    except asyncio.CancelledError:
+        logger.info("Background sync worker cancelled")
     logger.info("Application shutting down")
 
 app = FastAPI(
@@ -254,10 +270,17 @@ TRUSTED_PROXY_IPS = {
 RATE_LIMIT_SYNC_PER_MINUTE = int(os.getenv("RATE_LIMIT_SYNC_PER_MINUTE", "6"))
 RATE_LIMIT_SUMMARY_PER_MINUTE = int(os.getenv("RATE_LIMIT_SUMMARY_PER_MINUTE", "30"))
 _rate_limiter_store = {}
-AUTO_BLOCK_THREATS = os.getenv("AUTO_BLOCK_THREATS", "true").strip().lower() in {"1", "true", "yes"}
+AUTO_BLOCK_THREATS = os.getenv("AUTO_BLOCK_THREATS", "false").strip().lower() in {"1", "true", "yes"}
+AUTO_BLOCK_HIGH_CONFIDENCE_THREATS = {
+    "SQL_INJECTION_ATTEMPT",
+    "XSS_ATTACK_ATTEMPT",
+    "PATH_TRAVERSAL_ATTEMPT",
+    "COMMAND_INJECTION_ATTEMPT",
+    "HEADER_INJECTION_ATTEMPT",
+}
 
-DEFAULT_HOMEPAGE_BANNER_TEXT = "جــەژنــتــــــان پــیــــرۆز بـــێــت"
-DEFAULT_HOMEPAGE_BANNER_ALT_TEXT = "E I D    M U B A R A K "
+DEFAULT_HOMEPAGE_BANNER_TEXT = ""
+DEFAULT_HOMEPAGE_BANNER_ALT_TEXT = " "
 
 
 def _is_valid_iso_date(value: str) -> bool:
@@ -392,8 +415,16 @@ async def visitor_tracking_middleware(request: Request, call_next):
     
     # Fast IP block check (uses indexed database lookup)
     if db.is_ip_blocked(client_ip):
+        block_details = db.get_ip_block_details(client_ip) or {}
+        block_reason = html_lib.escape((block_details.get("reason") or "Blocked by security policy."), quote=True)
+        blocked_at = html_lib.escape((block_details.get("blocked_at") or "Unknown"), quote=True)
+        detail_section = (
+            f"<p><strong>Reason:</strong> {block_reason}</p>"
+            f"<p><strong>Blocked at:</strong> {blocked_at}</p>"
+        )
         return HTMLResponse(
-            content="""
+            content=(
+                """
             <!DOCTYPE html>
             <html>
             <head>
@@ -424,21 +455,32 @@ async def visitor_tracking_middleware(request: Request, call_next):
                 <div class="error-box">
                     <h1>🚫 403 Forbidden</h1>
                     <p>Your IP address has been blocked.</p>
+                """
+                + detail_section
+                + """
                     <p>Contact administrator if you believe this is an error.</p>
                 </div>
             </body>
             </html>
-            """,
+            """
+            ),
             status_code=403
         )
     
     # Hard block known identity values before processing expensive logic.
     username_qs = (request.query_params.get("username") or "").strip().lower()
     if username_qs and db.is_identity_blocked("username", username_qs):
+        identity_block = db.get_identity_block_details("username", username_qs) or {}
         return JSONResponse(
             {
                 "success": False,
-                "error": "Access denied. Account is blocked by security policy."
+                "error": "Access denied. This username is blocked by security policy.",
+                "block_details": {
+                    "type": "username",
+                    "value": username_qs,
+                    "reason": identity_block.get("reason") or "Blocked by security policy.",
+                    "blocked_at": identity_block.get("blocked_at") or "Unknown",
+                },
             },
             status_code=403,
         )
@@ -504,9 +546,10 @@ async def visitor_tracking_middleware(request: Request, call_next):
         
         # Auto-block if threat detected
         if threat_detected:
-            db.log_threat_detection(client_ip, threat_type, threat_details)
+            should_auto_block = AUTO_BLOCK_THREATS and threat_type in AUTO_BLOCK_HIGH_CONFIDENCE_THREATS
+            action_taken = "LOG_ONLY"
 
-            if AUTO_BLOCK_THREATS:
+            if should_auto_block:
                 reason = f"AUTO_BLOCK: {threat_type}"
                 db.block_ip(client_ip, reason=reason)
 
@@ -514,12 +557,19 @@ async def visitor_tracking_middleware(request: Request, call_next):
                 for known_username in db.get_recent_usernames_by_ip(client_ip, limit=10):
                     db.block_identity("username", known_username, reason=f"Linked to {client_ip} ({threat_type})")
 
+                action_taken = "AUTO_BLOCKED"
+
+            db.log_threat_detection(client_ip, threat_type, threat_details, action_taken=action_taken)
+
+            if should_auto_block:
                 logger.warning(f"⚠️ THREAT DETECTED AND BLOCKED: {client_ip} - {threat_type}")
                 return JSONResponse(
                     {
                         "success": False,
-                        "error": "Request blocked by SOC threat detection.",
+                        "error": "Request blocked by security policy.",
                         "threat_type": threat_type,
+                        "threat_details": threat_details,
+                        "block_reason": f"AUTO_BLOCK due to {threat_type}",
                     },
                     status_code=403,
                 )
@@ -553,7 +603,7 @@ async def sync_worker() -> None:
                 try:
                     if len(new_item_ids) == 1 and files:
                         # Get subject for single lecture
-                        subject = subject_map.get(new_item_ids[0], "بابەتی جیاواز")
+                        subject = subject_map.get(new_item_ids[0], "General Lectures")
                         sent_ok = notify_new_lecture(files[0], subject=subject, base_url=BASE_URL)
                         if sent_ok:
                             _mark_notified(new_item_ids[0])
@@ -564,13 +614,13 @@ async def sync_worker() -> None:
                         # Group lectures by subject
                         subjects_count = {}
                         for item_id in new_item_ids:
-                            subject = subject_map.get(item_id, "بابەتی جیاواز")
+                            subject = subject_map.get(item_id, "General Lectures")
                             subjects_count[subject] = subjects_count.get(subject, 0) + 1
                         
                         # Send notification for each subject with multiple lectures
                         all_sent_ok = True
                         for subject, count in subjects_count.items():
-                            sent_ok = notify_multiple_lectures(count, subject=subject)
+                            sent_ok = notify_multiple_lectures(count, subject=subject, base_url=BASE_URL)
                             if sent_ok:
                                 logger.info(f"✅ Telegram notification sent for {count} lectures in {subject}")
                             else:
@@ -591,6 +641,9 @@ async def sync_worker() -> None:
                 await asyncio.to_thread(auth_client.login)
             except Exception as login_exc:  # noqa: BLE001
                 logger.exception("Failed to re-authenticate: %s", login_exc)
+        except asyncio.CancelledError:
+            logger.info("Sync worker received cancellation signal")
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.exception("Sync worker failed: %s", exc)
         
@@ -652,7 +705,7 @@ async def manual_sync(request: Request) -> JSONResponse:
             try:
                 if len(new_item_ids) == 1 and files:
                     # Single lecture notification
-                    subject = subject_map.get(new_item_ids[0], "بابەتی جیاواز")
+                    subject = subject_map.get(new_item_ids[0], "General Lectures")
                     sent_ok = notify_new_lecture(files[0], subject=subject, base_url=BASE_URL)
                     if sent_ok:
                         _mark_notified(new_item_ids[0])
@@ -665,13 +718,13 @@ async def manual_sync(request: Request) -> JSONResponse:
                     # Group lectures by subject
                     subjects_count = {}
                     for item_id in new_item_ids:
-                        subject = subject_map.get(item_id, "بابەتی جیاواز")
+                        subject = subject_map.get(item_id, "General Lectures")
                         subjects_count[subject] = subjects_count.get(subject, 0) + 1
                     
                     # Send notification for each subject with multiple lectures
                     all_sent_ok = True
                     for subject, count in subjects_count.items():
-                        sent_ok = notify_multiple_lectures(count, subject=subject)
+                        sent_ok = notify_multiple_lectures(count, subject=subject, base_url=BASE_URL)
                         if sent_ok:
                             logger.info(f"✅ Manual sync: Telegram sent for {count} lectures in {subject}")
                         else:
@@ -803,7 +856,35 @@ def _infer_subject_from_filename(filename: str):
         for kw in keywords:
             if kw in name:
                 return subject
+
+    # Secondary heuristic: normalize and fuzzy-match against known subject labels.
+    normalized_name = re.sub(r'[^a-z0-9]+', ' ', name).strip()
+    if normalized_name:
+        all_known_subjects = list(subject_keywords.keys())
+        best_match = None
+        best_score = 0.0
+        for candidate in all_known_subjects:
+            candidate_norm = re.sub(r'[^a-z0-9]+', ' ', candidate.lower()).strip()
+            score = 0.0
+            if candidate_norm and normalized_name:
+                score = difflib.SequenceMatcher(None, normalized_name, candidate_norm).ratio()
+            if score > best_score:
+                best_score = score
+                best_match = candidate
+
+        if best_match and best_score >= 0.55:
+            return best_match
+
     return None
+
+
+def _normalize_subject_value(subject: str):
+    value = (subject or "").strip()
+    if not value:
+        return None
+    if value.lower() in GENERIC_SUBJECT_LABELS:
+        return None
+    return value
 
 
 def _infer_semester_from_filename(filename: str) -> str:
@@ -844,12 +925,12 @@ async def list_files() -> JSONResponse:
                 stat = path.stat()
                 file_db_info = db_info.get(path.name, {})
 
-                # Prefer subject from DB, otherwise try to infer from filename
-                subject = file_db_info.get("subject")
+                # Prefer a non-generic subject from DB, otherwise infer from filename.
+                subject = _normalize_subject_value(file_db_info.get("subject"))
                 if not subject:
                     subject = _infer_subject_from_filename(path.name)
                 if not subject:
-                    subject = "Other"
+                    subject = "Temporary"
 
                 # Prefer semester from DB, otherwise derive from subject (if known)
                 semester = file_db_info.get("semester")
@@ -857,7 +938,7 @@ async def list_files() -> JSONResponse:
                 if inferred_semester:
                     semester = inferred_semester
                 if not semester:
-                    if subject and subject != "Other":
+                    if subject and _normalize_subject_value(subject):
                         try:
                             semester = _get_semester_from_subject(subject)
                         except Exception:
@@ -1130,6 +1211,7 @@ async def attendance_login(request: Request) -> JSONResponse:
         
         # Blocked identities cannot authenticate even from a new IP/VPN.
         if db.is_identity_blocked("username", username):
+            identity_block = db.get_identity_block_details("username", username) or {}
             db.log_visitor(
                 client_ip,
                 f"Blocked Login Attempt: {username}",
@@ -1140,11 +1222,18 @@ async def attendance_login(request: Request) -> JSONResponse:
             logger.warning(f"🚫 Blocked account login attempt: {username} from IP {client_ip}")
             return JSONResponse({
                 "success": False,
-                "error": "This account is blocked by admin/security policy"
+                "error": "This account is blocked by admin/security policy.",
+                "block_details": {
+                    "type": "username",
+                    "value": username,
+                    "reason": identity_block.get("reason") or "Blocked by security policy.",
+                    "blocked_at": identity_block.get("blocked_at") or "Unknown",
+                },
             }, status_code=403)
 
         # If IP is already blocked, deny login immediately.
         if db.is_ip_blocked(client_ip):
+            ip_block = db.get_ip_block_details(client_ip) or {}
             db.log_visitor(
                 client_ip,
                 f"Blocked IP Login Attempt: {username}",
@@ -1154,7 +1243,13 @@ async def attendance_login(request: Request) -> JSONResponse:
             )
             return JSONResponse({
                 "success": False,
-                "error": "Your IP address is blocked"
+                "error": "Your IP address is blocked.",
+                "block_details": {
+                    "type": "ip",
+                    "value": client_ip,
+                    "reason": ip_block.get("reason") or "Blocked by security policy.",
+                    "blocked_at": ip_block.get("blocked_at") or "Unknown",
+                },
             }, status_code=403)
 
         result = await attendance_service.authenticate_user(username, password)
@@ -2286,14 +2381,14 @@ async def get_official_results(request: Request) -> JSONResponse:
                     "results": []
                 }, status_code=401)
 
-            # Avoid HTTP 500/401 hard-fail screens for temporary upstream issues.
+            # Strict mode: do not claim successful fetch when live data is unavailable.
             return JSONResponse({
-                "success": True,
+                "success": False,
+                "error": error_msg,
                 "results": [],
-                "total_count": 0,
-                "warning": error_msg,
+                "can_retry": True,
                 "source": "live"
-            })
+            }, status_code=502)
     
     except Exception as exc:
         logger.exception("Error fetching official results data: %s", str(exc))
@@ -2437,10 +2532,24 @@ async def refresh_results(request: Request) -> JSONResponse:
         logger.info(f"Fresh fetch: success={result.get('success')}, new_saved={result.get('new_results_saved', 0)}, total={result.get('total_count', 0)}")
         
         if result['success']:
+            fetched_results = result.get('results', []) or []
+            used_fallback = bool(result.get('warning'))
+
+            # Never report refresh as successful if fresh data was not actually obtained.
+            if used_fallback and not fetched_results:
+                return JSONResponse({
+                    "success": False,
+                    "error": result.get('warning', 'Failed to fetch fresh results from portal.'),
+                    "results": [],
+                    "total_count": 0,
+                    "new_results_saved": 0,
+                    "can_retry": True
+                }, status_code=502)
+
             return JSONResponse({
                 "success": True,
                 "message": f"Cleared {cleared_count} old results. Fetched {result.get('new_results_saved', 0)} fresh results from portal.",
-                "results": result['results'],
+                "results": fetched_results,
                 "total_count": result.get('total_count', 0),
                 "new_results_saved": result.get('new_results_saved', 0)
             })
@@ -6775,6 +6884,7 @@ async def dashboard() -> HTMLResponse:
             var inFlightResultAlerts = null;
             var inFlightOfficialResults = null;
             var inFlightPrivateBootstrap = null;
+            var officialResultsRetryTimer = null;
 
             // Security hardening: do not keep saved plaintext credentials in storage.
             safeStorage.removeItem('attendance_credentials');
@@ -6887,6 +6997,10 @@ async def dashboard() -> HTMLResponse:
                 inFlightResultAlerts = null;
                 inFlightOfficialResults = null;
                 inFlightPrivateBootstrap = null;
+                if (officialResultsRetryTimer) {{
+                    clearTimeout(officialResultsRetryTimer);
+                    officialResultsRetryTimer = null;
+                }}
             }}
 
             function ensurePrivateCacheOwner() {{
@@ -6904,6 +7018,10 @@ async def dashboard() -> HTMLResponse:
             function shouldBackgroundRefresh(cachedAt, maxAgeMs = 30000) {{
                 // Keep private datasets stable during session unless user explicitly logs out.
                 return false;
+            }}
+
+            function hasOfficialResultsCache() {{
+                return Array.isArray(cachedOfficialResults) && cachedOfficialResults.length > 0;
             }}
 
             async function apiFetchJson(url, options = {{}}, retries = 2, timeoutMs = 20000) {{
@@ -6935,6 +7053,18 @@ async def dashboard() -> HTMLResponse:
                         clearTimeout(timer);
 
                         if (!response.ok) {{
+                            const isPrivateApi =
+                                url.startsWith('/api/attendance/') ||
+                                url.startsWith('/api/results/') ||
+                                url.startsWith('/api/official-results/');
+
+                            // Some devices/proxies briefly delay cookie visibility right after login.
+                            // Give private APIs one short retry on 401 before treating it as a hard session failure.
+                            if (attempt < retries && response.status === 401 && isPrivateApi) {{
+                                await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+                                continue;
+                            }}
+
                             if (attempt < retries && response.status >= 500) {{
                                 await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
                                 continue;
@@ -6979,7 +7109,7 @@ async def dashboard() -> HTMLResponse:
                 }}
 
                 if (!inFlightOfficialResults) {{
-                    if (forceRefresh || !cachedOfficialResults) {{
+                    if (forceRefresh || !hasOfficialResultsCache()) {{
                         fetchOfficialResults(true);
                     }}
                 }}
@@ -7002,9 +7132,9 @@ async def dashboard() -> HTMLResponse:
                     const resultAlertsPromise = (forceRefresh || !cachedResultAlerts)
                         ? fetchResultAlerts(true).catch(() => false)
                         : Promise.resolve(true);
-                    const officialResultsPromise = (forceRefresh || !cachedOfficialResults)
+                    const officialResultsPromise = (forceRefresh || !hasOfficialResultsCache())
                         ? fetchOfficialResults(true).catch(() => false)
-                        : Promise.resolve(true);
+                        : Promise.resolve(hasOfficialResultsCache());
 
                     // 1) Prioritize attendance readiness for login UX.
                     let attendanceReady = false;
@@ -7026,7 +7156,7 @@ async def dashboard() -> HTMLResponse:
 
                     // 2) Kick off results fetches in background; do not block login reveal.
                     const resultAlertsReady = (await resultAlertsPromise) || !!cachedResultAlerts;
-                    const officialResultsReady = (await officialResultsPromise) || !!cachedOfficialResults;
+                    const officialResultsReady = (await officialResultsPromise) || hasOfficialResultsCache();
 
                     return {{ attendanceReady, resultAlertsReady, officialResultsReady }};
                 }})().finally(() => {{
@@ -7488,18 +7618,22 @@ async def dashboard() -> HTMLResponse:
                 }} catch (error) {{
                     console.error('❌ Error loading files:', error);
                     
-                    // Friendly offline message without panic
-                    const errorMsg = !navigator.onLine 
+                    const isOffline = !navigator.onLine;
+                    const stateTitle = isOffline ? 'No Internet Connection' : 'No Lectures Yet';
+                    const stateMessage = isOffline
                         ? 'You are offline. Connect to internet to load lectures.'
-                        : error.message;
+                        : 'No lectures available right now. Tap Sync Now to fetch your latest lectures.';
+                    const stateIcon = isOffline ? 'wifi-slash' : 'sync-alt';
+                    const actionLabel = isOffline ? 'Retry' : 'Sync Now';
+                    const actionHandler = isOffline ? 'loadFiles()' : 'syncNow()';
                     
                     document.getElementById('fileGrid').innerHTML = `
                         <div class="empty-state">
-                            <i class="fas fa-${{!navigator.onLine ? 'wifi-slash' : 'exclamation-triangle'}}"></i>
-                            <h3>${{!navigator.onLine ? 'No Internet Connection' : 'Error Loading Files'}}</h3>
-                            <p>${{errorMsg}}</p>
-                            <button onclick="loadFiles()" style="margin-top: 1rem; padding: 0.5rem 1rem; background: var(--accent); color: white; border: none; border-radius: 8px; cursor: pointer;">
-                                <i class="fas fa-sync"></i> Retry
+                            <i class="fas fa-${{stateIcon}}"></i>
+                            <h3>${{stateTitle}}</h3>
+                            <p>${{stateMessage}}</p>
+                            <button onclick="${{actionHandler}}" style="margin-top: 1rem; padding: 0.5rem 1rem; background: var(--accent); color: white; border: none; border-radius: 8px; cursor: pointer;">
+                                <i class="fas fa-sync"></i> ${{actionLabel}}
                             </button>
                         </div>
                     `;
@@ -7874,7 +8008,7 @@ async def dashboard() -> HTMLResponse:
                     
                     // Load official results - use cache if available
                     if (attendanceSessionToken) {{
-                        if (cachedOfficialResults) {{
+                        if (hasOfficialResultsCache()) {{
                             // Instantly show cached data
                             renderOfficialResults(cachedOfficialResults);
                         }} else if (inFlightOfficialResults) {{
@@ -7936,7 +8070,7 @@ async def dashboard() -> HTMLResponse:
                         if (cachedResultAlerts) {{
                             renderResultsCards(cachedResultAlerts.results, cachedResultAlerts.totalCount);
                         }}
-                        if (cachedOfficialResults) {{
+                        if (hasOfficialResultsCache()) {{
                             renderOfficialResults(cachedOfficialResults);
                         }}
 
@@ -8013,7 +8147,7 @@ async def dashboard() -> HTMLResponse:
                     }}, 2, 90000);
                     
                     if (result.success) {{
-                        // Save session token
+                        // Stage auth token locally, but do not commit full logged-in state yet.
                         attendanceSessionToken = result.session_token || 'cookie-session';
                         attendanceUsername = result.username;
 
@@ -8022,11 +8156,38 @@ async def dashboard() -> HTMLResponse:
 
                         // If this student has persisted caches from a previous session, rehydrate for instant tabs
                         rehydratePrivateCaches();
-                        
-                        // Set session timestamp (7 days expiration)
+
+                        // Fetch critical private data during login loading.
+                        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Loading your data...</span>';
+                        const prefetchState = await preloadPrivateDataForLogin({{ deferUiReveal: true, forceRefresh: true }});
+
+                        // Hard requirement: never finalize login until critical attendance data is ready.
+                        if (!prefetchState.attendanceReady || !cachedAttendanceData || !cachedAttendanceData.html || !isValidStudentRealName(cachedAttendanceData.fullName)) {{
+                            const failedOwner = getPrivateOwnerKey();
+                            attendanceSessionToken = null;
+                            attendanceUsername = null;
+                            clearPrivateCaches();
+                            if (failedOwner) {{
+                                purgePersistedPrivateCaches(failedOwner);
+                            }}
+                            safeStorage.removeItem('attendance_session_active');
+                            safeStorage.removeItem('attendance_username');
+                            safeStorage.removeItem('attendance_session_timestamp');
+
+                            document.getElementById('privateLoginArea').style.display = 'block';
+                            document.getElementById('privateDataArea').style.display = 'none';
+                            showNotification('Login blocked: required student profile data could not be loaded correctly. Please retry.', 'error');
+
+                            submitBtn.disabled = false;
+                            submitBtn.classList.remove('loading');
+                            submitBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i><span>Login Securely</span>';
+                            return;
+                        }}
+
+                        privateDataBootstrapped = true;
+
+                        // Set session timestamp only after critical data is validated.
                         updateSessionTimestamp();
-                        
-                        // Keep authenticated session markers for reliable restore after app close/reopen.
                         safeStorage.setItem('attendance_session_active', 'true');
                         safeStorage.setItem('attendance_username', result.username || username);
 
@@ -8039,35 +8200,15 @@ async def dashboard() -> HTMLResponse:
                             safeStorage.setItem('attendance_remember_enabled', 'false');
                         }}
 
-                        // Fetch ALL private data during login loading, so tabs are instant after login.
-                        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Loading your data...</span>';
-
-                        // Start private prefetch during login, but do not block authenticated entry on slow mobile networks.
-                        const prefetchState = await preloadPrivateDataForLogin({{ deferUiReveal: true, forceRefresh: true }});
-                        privateDataBootstrapped = true;
-
-                        // Now reveal private mode UI (everything should be ready)
+                        // Now reveal private mode UI.
                         document.getElementById('privateLoginArea').style.display = 'none';
                         document.getElementById('privateDataArea').style.display = 'block';
 
                         // Product requirement: always open Attendance after login.
                         switchPrivateSection('attendance');
 
-                        if (!prefetchState.attendanceReady) {{
-                            document.getElementById('attendanceContent').innerHTML = `
-                                <div class="empty-state">
-                                    <i class="fas fa-exclamation-triangle"></i>
-                                    <h3>Attendance Is Still Loading</h3>
-                                    <p>Login succeeded. Tap retry to load attendance data.</p>
-                                    <button onclick="loadAttendanceData(false, false)" style="margin-top: 1rem; padding: 0.6rem 1rem; background: var(--accent); color: #fff; border: none; border-radius: 10px; cursor: pointer;">
-                                        <i class="fas fa-sync"></i> Retry Attendance
-                                    </button>
-                                </div>
-                            `;
-                        }}
-
                         if (!prefetchState.resultAlertsReady || !prefetchState.officialResultsReady) {{
-                            console.warn('Some private sections are still loading in background; tab switch will auto-retry.');
+                            console.warn('Some non-critical private sections are still loading in background; tab switch will auto-retry.');
                         }}
                         
                         // Keep private data fixed during active session.
@@ -8102,25 +8243,23 @@ async def dashboard() -> HTMLResponse:
                 }}
             }}
             
+            function isLikelyStudentId(value) {{
+                const text = String(value || '').trim();
+                return /^B\d+$/i.test(text);
+            }}
+
+            function isValidStudentRealName(value) {{
+                const text = String(value || '').trim();
+                return text.length >= 2 && !isLikelyStudentId(text);
+            }}
+
             // Function to parse HTML and render beautiful cards
             async function renderAttendanceCards(html, fullName = null) {{
                 // Update student name in header with welcome message
-                if (fullName) {{
-                    // Check if fullName is actually a student ID (starts with B and has numbers)
-                    const isStudentId = /^B\\d+$/.test(fullName);
-                    
-                    if (isStudentId) {{
-                        // Show student ID with a friendly message
-                        document.getElementById('studentNameDisplay').innerHTML = `
-                            <span style="color: var(--accent);">Welcome</span> <span style="font-weight: 600;">${{fullName}}</span>
-                            <small style="display: block; font-size: 0.8em; color: var(--text-secondary); margin-top: 4px;">
-                                📝 To show your name instead of ID, contact the administrator
-                            </small>
-                        `;
-                    }} else {{
-                        // Show actual name without title
-                        document.getElementById('studentNameDisplay').textContent = `Welcome ${{fullName}}`;
-                    }}
+                if (isValidStudentRealName(fullName)) {{
+                    document.getElementById('studentNameDisplay').textContent = `Welcome ${{fullName}}`;
+                }} else {{
+                    document.getElementById('studentNameDisplay').textContent = 'Welcome Student';
                 }}
                 
                 // Create a temporary element to parse HTML
@@ -8331,33 +8470,50 @@ async def dashboard() -> HTMLResponse:
                         // Refresh session timestamp on successful data load
                         updateSessionTimestamp();
                         
-                        // Try to fetch profile (but don't fail if it doesn't work)
-                        let fullName = attendanceUsername;
+                        // Profile name is required for a complete/valid private session.
+                        let fullName = '';
                         
                         // First, check if we extracted name from attendance HTML
-                        if (attendanceResult.extracted_name) {{
+                        if (isValidStudentRealName(attendanceResult.extracted_name)) {{
                             fullName = attendanceResult.extracted_name;
-                        }} else {{
-                            // Try to fetch from profile API
-                            try {{
-                                const profileResult = await apiFetchJson('/api/attendance/profile', {{}}, 1, 9000);
-                                
-                                if (profileResult.success) {{
-                                    const firstName = profileResult.first_name || '';
-                                    const middleName = profileResult.middle_name || '';
-                                    const lastName = profileResult.last_name || '';
+                        }}
+
+                        // Try to fetch profile API a few times for slow upstream/cookie propagation delays.
+                        if (!isValidStudentRealName(fullName)) {{
+                            for (let profileAttempt = 0; profileAttempt < 3; profileAttempt++) {{
+                                try {{
+                                    const profileResult = await apiFetchJson('/api/attendance/profile', {{}}, 1, 9000);
                                     
-                                    // If we have a proper name (not just student ID), use it
-                                    if (firstName && lastName) {{
-                                        fullName = [firstName, middleName, lastName].filter(n => n).join(' ');
-                                    }} else if (firstName) {{
-                                        // Use just first name (which might be student ID)
-                                        fullName = firstName;
+                                    if (profileResult.success) {{
+                                        const firstName = String(profileResult.first_name || '').trim();
+                                        const middleName = String(profileResult.middle_name || '').trim();
+                                        const lastName = String(profileResult.last_name || '').trim();
+                                        const candidateName = [firstName, middleName, lastName].filter(n => n).join(' ').trim();
+
+                                        if (isValidStudentRealName(candidateName)) {{
+                                            fullName = candidateName;
+                                            break;
+                                        }}
                                     }}
+                                }} catch (profileError) {{
+                                    // Keep retrying within this loop.
                                 }}
-                            }} catch (profileError) {{
-                                console.log('Profile fetch failed, using student ID:', profileError);
+
+                                if (profileAttempt < 2) {{
+                                    await new Promise(resolve => setTimeout(resolve, 350 * (profileAttempt + 1)));
+                                }}
                             }}
+                        }}
+
+                        if (!isValidStudentRealName(fullName)) {{
+                            document.getElementById('attendanceContent').innerHTML = `
+                                <div class="empty-state">
+                                    <i class="fas fa-user-times"></i>
+                                    <h3>Profile Name Not Available</h3>
+                                    <p>We could not load your real profile name. Please tap Login again.</p>
+                                </div>
+                            `;
+                            return false;
                         }}
                         
                             // Cache for instant future loads in this session
@@ -8766,6 +8922,47 @@ async def dashboard() -> HTMLResponse:
             // ===================================
             // OFFICIAL RESULTS FUNCTIONS (StudentResult API)
             // ===================================
+
+            function normalizeOfficialResultsError(rawError) {{
+                const message = String(rawError || '').trim();
+                const lowered = message.toLowerCase();
+
+                if (!message) {{
+                    return 'Unable to load official results right now. Please try again.';
+                }}
+
+                if (lowered.includes('open the popup') || lowered.includes('fetch new data')) {{
+                    return 'Unable to load official results right now. Please retry.';
+                }}
+
+                return message;
+            }}
+
+            function showOfficialResultsLoading(message = 'Loading official results...') {{
+                const container = document.getElementById('officialResultsContent');
+                if (!container) return;
+                container.innerHTML = `
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p style="color: var(--text-secondary)">${{message}}</p>
+                    </div>
+                `;
+            }}
+
+            function scheduleOfficialResultsRetry(delayMs = 2500) {{
+                if (!attendanceSessionToken) {{
+                    return;
+                }}
+                if (officialResultsRetryTimer) {{
+                    clearTimeout(officialResultsRetryTimer);
+                }}
+                officialResultsRetryTimer = setTimeout(() => {{
+                    officialResultsRetryTimer = null;
+                    if (attendanceSessionToken && !inFlightOfficialResults) {{
+                        fetchOfficialResults(true);
+                    }}
+                }}, delayMs);
+            }}
             
             async function fetchOfficialResults(silentRefresh = false) {{
                 if (!attendanceSessionToken) {{
@@ -8776,24 +8973,14 @@ async def dashboard() -> HTMLResponse:
 
                 // Deduplicate concurrent loads
                 if (inFlightOfficialResults) {{
-                    if (!silentRefresh && !cachedOfficialResults) {{
-                        document.getElementById('officialResultsContent').innerHTML = `
-                            <div class="loading">
-                                <div class="spinner"></div>
-                                <p style="color: var(--text-secondary)">Loading official results...</p>
-                            </div>
-                        `;
+                    if (!silentRefresh && !hasOfficialResultsCache()) {{
+                        showOfficialResultsLoading('Loading official results...');
                     }}
                     return inFlightOfficialResults;
                 }}
                 
                 if (!silentRefresh) {{
-                    document.getElementById('officialResultsContent').innerHTML = `
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            <p style="color: var(--text-secondary)">Loading official results...</p>
-                        </div>
-                    `;
+                    showOfficialResultsLoading('Loading official results...');
                 }}
                 
                 const requestToken = attendanceSessionToken;
@@ -8816,17 +9003,30 @@ async def dashboard() -> HTMLResponse:
                         const fetchedOfficialResults = Array.isArray(result.results) ? result.results : [];
 
                         // Avoid replacing valid data with a transient empty payload.
-                        if (fetchedOfficialResults.length === 0 && cachedOfficialResults && cachedOfficialResults.length > 0) {{
+                        if (fetchedOfficialResults.length === 0 && hasOfficialResultsCache()) {{
                             console.warn('Official results response was empty; keeping last known results.');
                             renderOfficialResults(cachedOfficialResults);
+                            scheduleOfficialResultsRetry(2500);
                         }} else {{
-                            // Cache the data for instant future loads
-                            cachedOfficialResults = fetchedOfficialResults;
-                            cachedOfficialResultsAt = Date.now();
-                            persistPrivateCache('official_results', cachedOfficialResults);
+                            if (fetchedOfficialResults.length > 0) {{
+                                // Cache the data for instant future loads
+                                cachedOfficialResults = fetchedOfficialResults;
+                                cachedOfficialResultsAt = Date.now();
+                                persistPrivateCache('official_results', cachedOfficialResults);
 
-                            // Render official results
-                            renderOfficialResults(cachedOfficialResults);
+                                if (officialResultsRetryTimer) {{
+                                    clearTimeout(officialResultsRetryTimer);
+                                    officialResultsRetryTimer = null;
+                                }}
+
+                                // Render official results
+                                renderOfficialResults(cachedOfficialResults);
+                            }} else {{
+                                // API success with empty payload means portal data may still be syncing.
+                                showOfficialResultsLoading('Official results are syncing. Please wait...');
+                                scheduleOfficialResultsRetry(2500);
+                                return false;
+                            }}
                         }}
                         loadedSuccessfully = true;
                     }} else {{
@@ -8838,16 +9038,13 @@ async def dashboard() -> HTMLResponse:
                             // Keep showing last cached results if we have any,
                             // and only replace the UI with an error screen when
                             // there is no cached data yet (first load).
-                            console.warn('Error loading official results:', result.error);
-                            if (!cachedOfficialResults || cachedOfficialResults.length === 0) {{
-                                document.getElementById('officialResultsContent').innerHTML = `
-                                    <div class="empty-state">
-                                        <i class="fas fa-exclamation-triangle"></i>
-                                        <h3>Error Loading Results</h3>
-                                        <p>${{result.error}}</p>
-                                    </div>
-                                `;
+                            const normalizedError = normalizeOfficialResultsError(result.error);
+                            console.warn('Error loading official results:', normalizedError);
+                            if (!hasOfficialResultsCache()) {{
+                                showOfficialResultsLoading('Official results are still loading. Retrying...');
+                                scheduleOfficialResultsRetry(2500);
                             }}
+                            showNotification(normalizedError, 'error');
                         }}
                         }}
                     }} catch (error) {{
@@ -8862,17 +9059,13 @@ async def dashboard() -> HTMLResponse:
                             return false;
                         }}
 
-                        console.error('Network error while loading official results:', error);
+                        const normalizedNetworkError = normalizeOfficialResultsError(error && error.message);
+                        console.error('Network error while loading official results:', normalizedNetworkError);
                         // Same rule: only show error screen if we have no cached
                         // results yet; otherwise keep the last good data visible.
-                        if (!cachedOfficialResults || cachedOfficialResults.length === 0) {{
-                            document.getElementById('officialResultsContent').innerHTML = `
-                                <div class="empty-state">
-                                    <i class="fas fa-exclamation-triangle"></i>
-                                    <h3>Error Loading Results</h3>
-                                    <p>${{error.message}}</p>
-                                </div>
-                            `;
+                        if (!hasOfficialResultsCache()) {{
+                            showOfficialResultsLoading('Official results are still loading. Retrying...');
+                            scheduleOfficialResultsRetry(3000);
                         }}
                     }}
                     return loadedSuccessfully;
@@ -8887,17 +9080,8 @@ async def dashboard() -> HTMLResponse:
                 const container = document.getElementById('officialResultsContent');
                 
                 if (!results || results.length === 0) {{
-                    container.innerHTML = `
-                        <div class="no-absences">
-                            <i class="fas fa-clipboard-list"></i>
-                            <h3>No Official Results Found</h3>
-                            <p>Your official exam results will appear here once published by the college.</p>
-                            <div class="login-note" style="margin-top: 1rem;">
-                                <i class="fas fa-info-circle"></i>
-                                <span>This section shows official results from the student portal system</span>
-                            </div>
-                        </div>
-                    `;
+                    showOfficialResultsLoading('Official results are syncing. Please wait...');
+                    scheduleOfficialResultsRetry(2500);
                     return;
                 }}
                 

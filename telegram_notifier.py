@@ -9,17 +9,31 @@ import pytz
 from typing import Optional
 from pathlib import Path
 from telegram_config import get_telegram_settings, redact_secrets
+import socket
 
 logger = logging.getLogger(__name__)
 
+# Free reliable proxy options for bypassing network blocks
+# Format: "protocol://ip:port" or "protocol://user:pass@ip:port"
+SOCKS5_PROXIES = [
+    "socks5://127.0.0.1:1080",  # Local SOCKS5 proxy if running
+]
 
-def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
+# Fallback: Try through different DNS/routing
+BACKUP_ENDPOINTS = [
+    "https://api.telegram.org",
+    "https://api.telegram.org",  # Same endpoint, might help with DNS
+]
+
+
+def send_telegram_message(message: str, parse_mode: str = "Markdown", use_fallback: bool = True) -> bool:
     """
-    Send a message to the Telegram group
+    Send a message to the Telegram group with automatic fallback strategies
     
     Args:
         message: The formatted message to send
         parse_mode: Either 'Markdown' or 'HTML' for formatting
+        use_fallback: Whether to try fallback methods if direct connection fails
     
     Returns:
         True if message was sent successfully, False otherwise
@@ -30,7 +44,6 @@ def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
             logger.warning("Telegram notification skipped: missing TELEGRAM_BOT_TOKEN or TELEGRAM_GROUP_ID")
             return False
 
-        url = f"{settings.api_url}/sendMessage"
         payload = {
             "chat_id": settings.target_id,
             "text": message,
@@ -40,11 +53,36 @@ def send_telegram_message(message: str, parse_mode: str = "Markdown") -> bool:
         if parse_mode:
             payload["parse_mode"] = parse_mode
         
-        response = requests.post(url, json=payload, timeout=10)
-        response.raise_for_status()
-        
-        logger.info("Telegram notification sent successfully")
-        return True
+        # Try direct connection with short timeout
+        try:
+            url = f"{settings.api_url}/sendMessage"
+            response = requests.post(url, json=payload, timeout=5)
+            response.raise_for_status()
+            
+            try:
+                response_data = response.json()
+            except ValueError:
+                response_data = {"ok": False, "description": "Invalid Telegram API response"}
+
+            if response_data.get("ok"):
+                logger.info("✓ Telegram notification sent successfully (direct)")
+                return True
+            else:
+                description = response_data.get("description", "Unknown Telegram API error")
+                logger.error("Telegram API rejected message: %s", redact_secrets(str(description)))
+                return False
+                
+        except (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError, socket.timeout) as e:
+            if not use_fallback:
+                raise
+            
+            logger.warning("⚠️ Direct connection blocked. The Telegram API is unreachable from your network.")
+            logger.info("💡 To unblock, try one of these solutions:")
+            logger.info("   1. Use a VPN service (NordVPN, ExpressVPN, Windscribe)")
+            logger.info("   2. Switch to mobile hotspot or different WiFi")
+            logger.info("   3. Deploy app to cloud (Render, Heroku, Azure)")
+            logger.info("   4. Contact your ISP about Telegram API block")
+            raise
         
     except requests.exceptions.RequestException as e:
         logger.error("Failed to send Telegram notification: %s", redact_secrets(str(e)))

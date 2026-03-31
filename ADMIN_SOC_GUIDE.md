@@ -196,7 +196,7 @@ The admin dashboard is fully responsive and works on:
 ### Change Admin Key Location
 Edit `.env`:
 ```env
-SECRET_ADMIN_KEY=my-new-super-secret-key-2026
+SECRET_ADMIN_KEY=your_new_secret_admin_key_here
 ```
 
 ### Adjust Monitored Paths

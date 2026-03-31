@@ -31,9 +31,9 @@ def get_student_info(student_id: str):
         # Return info from mapping
         return info
     else:
-        # Fallback: Use student ID as the name
+        # Fallback: return empty name fields (never expose student ID as display name)
         return {
-            "first_name": student_id,  # Use full student ID as name
+            "first_name": "",
             "middle_name": "",
             "last_name": "",
             "gender": "Male"  # Default to Male (can be updated later)

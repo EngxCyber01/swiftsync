@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import sqlite3
+import pytz
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Tuple
@@ -30,7 +31,17 @@ DATA_DIR = ROOT / "data"
 DOWNLOAD_DIR = ROOT / "lectures_storage"
 DB_PATH = DATA_DIR / "lecture_sync.db"
 
-SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "3600"))
+SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "1800"))
+
+GENERIC_SUBJECTS = {
+    "",
+    "other",
+    "all lectures",
+    "general lectures",
+    "unknown",
+    "unknown subject",
+    "بابەتی جیاواز",
+}
 
 
 def _ensure_dirs() -> None:
@@ -114,6 +125,36 @@ def _mark_seen(item_id: str, subject: str = None, filename: str = None, upload_d
             (item_id, subject, filename, upload_date, semester)
         )
         conn.commit()
+
+
+def _is_generic_subject(subject: str) -> bool:
+    value = (subject or "").strip().lower()
+    return value in GENERIC_SUBJECTS
+
+
+def _backfill_subject_for_seen_item(item_id: str, subject: str) -> None:
+    """Update subject metadata for previously-seen items that were saved as generic/empty."""
+    clean_subject = (subject or "").strip()
+    if not clean_subject or _is_generic_subject(clean_subject):
+        return
+
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.execute("SELECT subject FROM synced_items WHERE id = ?", (item_id,))
+        row = cur.fetchone()
+        if not row:
+            return
+
+        existing_subject = (row[0] or "").strip()
+        if existing_subject and not _is_generic_subject(existing_subject):
+            return
+
+        semester = _get_semester_from_subject(clean_subject)
+        conn.execute(
+            "UPDATE synced_items SET subject = ?, semester = ? WHERE id = ?",
+            (clean_subject, semester, item_id),
+        )
+        conn.commit()
+        logger.info("Backfilled subject for ID %s -> %s", item_id, clean_subject)
 
 
 def _was_notified(item_id: str) -> bool:
@@ -228,67 +269,54 @@ def fetch_timeline_with_subjects(session: requests.Session) -> dict:
         if not card:
             continue
         
-        # Use regex on the HTML string to extract subjects and their file IDs
-        card_html = str(card)
-        download_pattern = r'DownloadClassSessionFile\?id=([a-f0-9\-]+)'
-        
-        # Split by subject headers: <p class="m-0 float-left font-weight-bold">SUBJECT_NAME</p>
-        # Pattern to find subject headers
-        subject_pattern = r'<p class="m-0 float-left font-weight-bold">([^<]+)</p>'
-        
-        # Find all subject headers with their positions
-        subject_matches = list(re.finditer(subject_pattern, card_html))
-        
-        if not subject_matches:
-            logger.warning("No subject headers found, using fallback")
-            all_file_ids = re.findall(download_pattern, card_html)
-            subjects_data['All Lectures'] = list(set(all_file_ids))
-            logger.info("Found %d files in fallback mode", len(subjects_data['All Lectures']))
-        else:
-            seen_file_ids = set()
-            
-            for i, match in enumerate(subject_matches):
-                subject_name = match.group(1).strip()
-                
-                # Skip semester headers
-                if subject_name in ['Fall Semester', 'Spring Semester', 'Summer Semester'] or len(subject_name) < 5:
-                    continue
-                
-                # Get HTML between this subject and the next one
-                start_pos = match.end()
-                if i + 1 < len(subject_matches):
-                    # Find the next valid subject (not a semester header)
-                    next_pos = None
-                    for j in range(i + 1, len(subject_matches)):
-                        next_subject = subject_matches[j].group(1).strip()
-                        if next_subject not in ['Fall Semester', 'Spring Semester', 'Summer Semester'] and len(next_subject) >= 5:
-                            next_pos = subject_matches[j].start()
-                            break
-                    if next_pos:
-                        end_pos = next_pos
-                    else:
-                        end_pos = len(card_html)
-                else:
-                    end_pos = len(card_html)
-                
-                # Extract file IDs from this subject's section
-                subject_html = card_html[start_pos:end_pos]
-                file_ids = re.findall(download_pattern, subject_html)
-                
-                # Remove duplicates
-                unique_file_ids = [fid for fid in file_ids if fid not in seen_file_ids]
-                
-                if unique_file_ids:
-                    subjects_data[subject_name] = unique_file_ids
-                    seen_file_ids.update(unique_file_ids)
-                    logger.info("Found %d unique files in subject: %s", len(unique_file_ids), subject_name)
-            
-            if not subjects_data:
-                # Fallback if no valid subjects found
-                logger.warning("No valid subjects found, using fallback")
-                all_file_ids = re.findall(download_pattern, card_html)
-                subjects_data['All Lectures'] = list(set(all_file_ids))
-                logger.info("Found %d files in fallback mode", len(subjects_data['All Lectures']))
+        # Preferred path: each subject appears in a button with data-semester="true" and
+        # a corresponding collapse section that contains download links.
+        subject_buttons = card.find_all('button', attrs={'data-semester': 'true'})
+        seen_file_ids = set()
+
+        for button in subject_buttons:
+            subject_tag = button.find('p', class_='float-left font-weight-bold')
+            subject_name = subject_tag.get_text(strip=True) if subject_tag else button.get_text(" ", strip=True)
+            if not subject_name:
+                continue
+
+            if subject_name in ['Fall Semester', 'Spring Semester', 'Summer Semester']:
+                continue
+
+            collapse_id = (button.get('data-target') or '').strip().lstrip('#')
+            if not collapse_id:
+                continue
+
+            collapse_div = card.find('div', id=collapse_id) or soup.find('div', id=collapse_id)
+            if not collapse_div:
+                continue
+
+            file_ids = []
+            for link in collapse_div.find_all('a', href=True):
+                href = link.get('href', '')
+                match = re.search(r'DownloadClassSessionFile\?id=([a-f0-9\-]+)', href, flags=re.IGNORECASE)
+                if match:
+                    file_ids.append(match.group(1))
+
+            unique_file_ids = [fid for fid in file_ids if fid not in seen_file_ids]
+            if unique_file_ids:
+                subjects_data[subject_name] = unique_file_ids
+                seen_file_ids.update(unique_file_ids)
+                logger.info("Found %d unique files in subject: %s", len(unique_file_ids), subject_name)
+
+        # Safety fallback: if button/collapse parsing fails, scan links in the year card.
+        if not subjects_data:
+            logger.warning("Structured subject parsing found no data, using safe fallback")
+            all_ids = set()
+            for link in card.find_all('a', href=True):
+                href = link.get('href', '')
+                match = re.search(r'DownloadClassSessionFile\?id=([a-f0-9\-]+)', href, flags=re.IGNORECASE)
+                if match:
+                    all_ids.add(match.group(1))
+
+            if all_ids:
+                subjects_data['General Lectures'] = sorted(all_ids)
+                logger.info("Found %d files in fallback mode", len(all_ids))
     
     total_files = sum(len(v) for v in subjects_data.values())
     logger.info("Total subjects: %d, Total files: %d", len(subjects_data), total_files)
@@ -374,6 +402,7 @@ def sync_once(auth_client: AuthClient, send_notifications: bool = True) -> Tuple
         for subject, ids in subjects_data.items():
             for item_id in ids:
                 if _seen(item_id):
+                    _backfill_subject_for_seen_item(item_id, subject)
                     logger.debug("Skipping already downloaded ID: %s", item_id)
                     continue
                 try:

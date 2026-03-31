@@ -137,6 +137,35 @@ def is_ip_blocked(ip_address: str) -> bool:
         return False
 
 
+def get_ip_block_details(ip_address: str) -> Optional[Dict[str, str]]:
+    """Return reason and timestamp for a blocked IP, or None if not blocked."""
+    if not ip_address:
+        return None
+
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT reason, blocked_at
+                FROM blacklist
+                WHERE ip_address = ?
+                LIMIT 1
+                """,
+                (ip_address,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "reason": str(row[0] or ""),
+                "blocked_at": str(row[1] or ""),
+            }
+    except Exception as e:
+        print(f"Error getting IP block details: {e}")
+        return None
+
+
 def block_ip(ip_address: str, reason: str = "Manual block"):
     """Add an IP to the blacklist"""
     with sqlite3.connect(DB_PATH) as conn:
@@ -203,6 +232,37 @@ def is_identity_blocked(identity_type: str, identity_value: str) -> bool:
     except Exception as e:
         print(f"Error checking identity blacklist: {e}")
         return False
+
+
+def get_identity_block_details(identity_type: str, identity_value: str) -> Optional[Dict[str, str]]:
+    """Return reason and timestamp for a blocked identity, or None if not blocked."""
+    normalized_type = (identity_type or "").strip().lower()
+    normalized_value = (identity_value or "").strip().lower()
+    if not normalized_type or not normalized_value:
+        return None
+
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT reason, blocked_at
+                FROM identity_blacklist
+                WHERE identity_type = ? AND identity_value = ?
+                LIMIT 1
+                """,
+                (normalized_type, normalized_value),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "reason": str(row[0] or ""),
+                "blocked_at": str(row[1] or ""),
+            }
+    except Exception as e:
+        print(f"Error getting identity block details: {e}")
+        return None
 
 
 def get_recent_usernames_by_ip(ip_address: str, limit: int = 10) -> List[str]:
@@ -533,7 +593,7 @@ def detect_suspicious_user_agent(user_agent: str) -> bool:
     return any(agent in user_agent_lower for agent in suspicious_agents)
 
 
-def log_threat_detection(ip_address: str, threat_type: str, details: str):
+def log_threat_detection(ip_address: str, threat_type: str, details: str, action_taken: str = "DETECTED"):
     """Log a detected threat for monitoring"""
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
@@ -553,7 +613,7 @@ def log_threat_detection(ip_address: str, threat_type: str, details: str):
         cursor.execute("""
             INSERT INTO threat_logs (ip_address, threat_type, details, detected_at, action_taken)
             VALUES (?, ?, ?, ?, ?)
-        """, (ip_address, threat_type, details, datetime.now(pytz.timezone('Asia/Baghdad')).isoformat(), "AUTO_BLOCKED"))
+        """, (ip_address, threat_type, details, datetime.now(pytz.timezone('Asia/Baghdad')).isoformat(), action_taken))
         conn.commit()
 
 

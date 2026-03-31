@@ -407,6 +407,20 @@ class AttendanceService:
             
             if response.status_code == 200:
                 html_content = response.text
+
+                # Guard against false-positive success where portal returns login/challenge HTML with HTTP 200.
+                lowered_html = html_content.lower()
+                if (
+                    '__requestverificationtoken' in lowered_html
+                    or '/account/login' in lowered_html
+                    or 'tempids-su.awrosoft.com' in lowered_html
+                    or 'identityserver' in lowered_html
+                ):
+                    self.session_manager.delete_session(session_token)
+                    return {
+                        'success': False,
+                        'error': 'Session is not authorized for attendance yet. Please login again.'
+                    }
                 
                 # Try to extract student name from HTML
                 student_name = None
